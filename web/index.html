@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>四六级阅读错因实验室 · StudyHack</title>
+  <meta name="description" content="面向大学生四六级备考：阅读错因实验室（选答案、点原文证据、看错因证据卡、做同类新题）与参考估分（参考区间、距目标分参考差、写译语言反馈）。预置练习人工核对，免登录可体验；当前作答只保存在本浏览器。" />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Cpath d='M6 7h5a2 2 0 0 1 2 2v8a1.5 1.5 0 0 0-1.5-1.5H6zM18 7h-5a2 2 0 0 0-2 2v8a1.5 1.5 0 0 1 1.5-1.5H18z' fill='none' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="lab.css" />
+</head>
+<body>
+  <!-- icon sprite: reading lab uses #i-*, estimator uses #e-i-* -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7c0-1.5-1.5-2.5-3.5-2.5S5 5 5 6.5v11c0-1 1.5-1.5 3.5-1.5s3.5 1 3.5 2.5"/><path d="M12 7c0-1.5 1.5-2.5 3.5-2.5S19 5 19 6.5v11c0-1-1.5-1.5-3.5-1.5s-3.5 1-3.5 2.5"/><path d="M12 7v11.5"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+    <symbol id="i-translate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h8M8 3v2c0 4-2 7-5 8"/><path d="M6 9c0 2.5 2.5 4.5 6 5"/><path d="M13 20l4-9 4 9M14.5 17h5"/></symbol>
+    <symbol id="i-vocab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 1 2-2h13M9 7h6M9 11h4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-4 3.5-6 5.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3M20 5v6h-6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="e-i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 4-6"/></symbol>
+    <symbol id="e-i-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="e-i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+    <symbol id="e-i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="e-i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="e-i-listen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 18 0"/><path d="M21 16a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2z"/><path d="M3 16a2 2 0 0 0 2 2h1v-6H5a2 2 0 0 0-2 2z"/></symbol>
+    <symbol id="e-i-read" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2z"/><path d="M22 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z"/></symbol>
+    <symbol id="e-i-write" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+    <symbol id="e-i-trans" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h7"/><path d="M7 4v1c0 4-2 7-4 8"/><path d="M5 9c0 2 2 4 5 5"/><path d="M12 20l4-9 4 9"/><path d="M13.5 17h5"/></symbol>
+    <symbol id="e-i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="e-i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="e-i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></symbol>
+    <symbol id="e-i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></symbol>
+    <symbol id="e-i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+  </svg>
+
+  <div class="bg" aria-hidden="true"><span class="orb a"></span><span class="orb b"></span></div>
+
+  <header class="header">
+    <div class="brand">
+      <span class="logo"><svg><use href="#i-book"/></svg></span>
+      <div class="titles">
+        <h1>四六级 <span class="thin">StudyHack</span></h1>
+        <p class="sub">阅读错因实验室 · 参考估分 · 备考建议</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <span class="status-pill" id="statusPill" data-state="checking" role="status">
+      <span class="dot"></span><span class="txt" id="statusText">检测服务…</span>
+    </span>
+  </header>
+
+  <main class="wrap">
+    <nav class="tabnav" role="tablist" aria-label="功能切换">
+      <button class="tab" id="tab-reading" role="tab" type="button" aria-selected="true" aria-controls="view-reading">
+        <svg><use href="#i-target"/></svg><span>错因实验室</span>
+      </button>
+      <button class="tab" id="tab-estimator" role="tab" type="button" aria-selected="false" aria-controls="view-estimator" tabindex="-1">
+        <svg><use href="#e-i-chart"/></svg><span>参考估分</span>
+      </button>
+    </nav>
+
+    <!-- ==================== 阅读错因实验室 ==================== -->
+    <section class="view view-reading active" id="view-reading" role="tabpanel" aria-labelledby="tab-reading">
+      <div class="lab-subnav" role="tablist" aria-label="阅读模式">
+        <button class="subtab" id="subtab-lab" role="tab" type="button" aria-selected="true" aria-controls="labPanel">错因实验室</button>
+        <button class="subtab" id="subtab-tool" role="tab" type="button" aria-selected="false" aria-controls="toolPanel">阅读工具</button>
+      </div>
+
+      <div class="lab-panel" id="labPanel" role="tabpanel" aria-labelledby="subtab-lab">
+        <section class="card lab-hero">
+          <div class="lh-copy">
+            <span class="eyebrow"><svg width="15" height="15"><use href="#i-spark"/></svg> StudyHack · 四六级阅读错因实验室</span>
+            <h2>不只看完解析，而是验证你真的学会了</h2>
+            <p>选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
+            <div class="lh-actions">
+              <button class="btn btn-primary btn-lg" id="labStartBtn" type="button"><svg><use href="#i-spark"/></svg>开始示例</button>
+              <button class="btn btn-lg-ghost" id="labCustomBtn" type="button"><svg><use href="#i-file"/></svg>使用自带材料</button>
+            </div>
+            <p class="lh-note">预置练习由人工核对，免登录即可走完整流程；自带题会调用真实 AI 诊断。当前作答只保存在本浏览器，不涉及账号。</p>
+          </div>
+          <div class="lh-facts" aria-hidden="true">
+            <div><b>3</b><span>类已打通错因</span></div>
+            <div><b>证据卡</b><span>some / all 并排标记</span></div>
+            <div><b>同类题</b><span>用新题验证迁移</span></div>
+          </div>
+        </section>
+
+        <div class="lab-grid">
+          <aside class="card lab-side">
+            <div class="card-head">
+              <span class="chip t"><svg><use href="#i-book"/></svg></span>
+              <div><h2>选择材料</h2><p class="hint">预置练习 · 人工核对答案</p></div>
+            </div>
+            <div class="card-body">
+              <div class="preset-list" id="labPresetList"></div>
+              <div class="side-divider"><span>或</span></div>
+              <button type="button" class="btn btn-block" id="labSideCustomBtn"><svg><use href="#i-file"/></svg>使用自带材料</button>
+              <div class="mode-badge" id="labModeBadge" data-mode="local">本地示例模式</div>
+            </div>
+          </aside>
+
+          <main class="lab-main" aria-live="polite">
+            <div class="card empty" id="labEmpty">
+              <svg class="art" viewBox="0 0 200 200" fill="none" aria-hidden="true">
+                <circle cx="100" cy="100" r="86" fill="#e7effe"/>
+                <circle cx="100" cy="100" r="86" stroke="#dbe4f2" stroke-width="2"/>
+                <rect x="54" y="50" width="92" height="104" rx="10" fill="#fff" stroke="#dbe4f2" stroke-width="2"/>
+                <path d="M70 72h60M70 88h60M70 104h40" stroke="#bcd0f5" stroke-width="5" stroke-linecap="round"/>
+                <path d="M70 122h26" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+                <circle cx="140" cy="136" r="27" fill="#2563eb"/>
+                <path d="M131 136l6 6 12-13" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <h3>先做一道，再验证你学会了什么</h3>
+              <p>选择一篇预置练习或粘贴自带材料，完成「选答案 + 点依据 + 选信心」，再看短提示与错因证据卡。</p>
+              <div class="chips"><span>证据定位</span><span>some / all 对照</span><span>错因诊断</span><span>同类新题</span></div>
+              <button type="button" class="btn btn-primary" id="labEmptyStart"><svg><use href="#i-spark"/></svg>开始示例</button>
+            </div>
+            <div id="labStage" class="lab-stage" hidden></div>
+          </main>
+        </div>
+      </div>
+
+      <!-- ==================== 阅读工具（按需加载） ==================== -->
+      <div class="tool-panel" id="toolPanel" role="tabpanel" aria-labelledby="subtab-tool" hidden>
+        <div class="workspace">
+          <section class="input-panel" aria-label="阅读工具输入区">
+            <details class="card guide" open>
+              <summary>
+                <span class="ico"><svg width="18" height="18"><use href="#i-info"/></svg></span>
+                阅读工具说明
+                <span class="chev"><svg width="18" height="18"><use href="#i-chev"/></svg></span>
+              </summary>
+              <ol>
+                <li>选择级别并粘贴<b>阅读原文</b>，只想看翻译或生词也可以。</li>
+                <li>点 <b>全文翻译 / 重点生词 / 长难句</b> 按需加载，每次只请求一个短结果。</li>
+                <li>长材料会自动分段翻译；某段失败时可<b>只重试失败段</b>，已加载结果保留。</li>
+                <li>生词可一键导出默写清单。</li>
+              </ol>
+              <div class="tip"><svg width="16" height="16"><use href="#i-spark"/></svg><span>想验证自己是否真的读懂？切到「错因实验室」，用证据卡诊断错因。</span></div>
+            </details>
+
+            <div class="card composer">
+              <div class="field-label"><span>考试级别</span></div>
+              <div class="seg" id="toolLevelSeg" data-level="CET4" role="group" aria-label="考试级别">
+                <span class="thumb" aria-hidden="true"></span>
+                <button type="button" data-level="CET4" aria-pressed="true">四级 CET-4</button>
+                <button type="button" data-level="CET6" aria-pressed="false">六级 CET-6</button>
+              </div>
+              <div class="field-label">
+                <span>原文</span>
+                <span class="count" id="toolCharCount">0 / 6000</span>
+              </div>
+              <textarea id="toolInput" spellcheck="false" aria-label="阅读原文输入框" placeholder="在此粘贴四六级阅读原文……&#10;长材料会自动分段翻译。"></textarea>
+              <div class="mini-actions">
+                <button type="button" class="btn btn-sm" id="toolSampleBtn"><svg><use href="#i-file"/></svg>加载示例</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="toolClearBtn"><svg><use href="#i-trash"/></svg>清空</button>
+              </div>
+              <div class="tool-actions">
+                <button type="button" class="btn" id="toolTransBtn"><svg><use href="#i-translate"/></svg>全文翻译</button>
+                <button type="button" class="btn" id="toolVocabBtn"><svg><use href="#i-vocab"/></svg>重点生词</button>
+                <button type="button" class="btn" id="toolGrammarBtn"><svg><use href="#i-branch"/></svg>长难句</button>
+              </div>
+              <p class="submit-note">按需加载 · 长材料自动分段 · 失败可单独重试</p>
+              <div class="mode-badge" id="toolModeBadge" data-mode="local">本地示例模式</div>
+            </div>
+          </section>
+
+          <section class="results" aria-label="阅读工具结果">
+            <div class="card result-bar show" id="toolBar">
+              <div class="meta"><span class="tag" id="toolTag">按需加载</span><span id="toolMeta"></span></div>
+              <button type="button" class="btn btn-ok" id="toolExportBtn" disabled><svg><use href="#i-download"/></svg>导出默写清单</button>
+              <button type="button" class="btn" id="toolCopyBtn"><svg><use href="#i-copy"/></svg>复制结果</button>
+              <button type="button" class="btn btn-ghost" id="toolResetBtn"><svg><use href="#i-refresh"/></svg>清空结果</button>
+            </div>
+
+            <article class="card section tool-section" id="tool-sec-translation">
+              <div class="card-head">
+                <span class="chip t"><svg><use href="#i-translate"/></svg></span>
+                <div><h2>全文翻译</h2><p class="hint">分段加载 · 已加载部分会保留</p></div>
+                <span class="grow"></span>
+                <button type="button" class="btn btn-sm btn-ghost" id="tool-retry-translation" hidden><svg><use href="#i-refresh"/></svg>重试失败段</button>
+              </div>
+              <div class="card-body">
+                <div class="tool-status" id="tool-status-translation"></div>
+                <div class="md" id="tool-body-translation"></div>
+              </div>
+            </article>
+
+            <article class="card section tool-section" id="tool-sec-vocab">
+              <div class="card-head">
+                <span class="chip v"><svg><use href="#i-vocab"/></svg></span>
+                <div><h2>重点生词</h2><p class="hint">音标 + 释义 · 考纲词优先</p></div>
+                <span class="grow"></span>
+                <button type="button" class="btn btn-sm btn-ghost" id="tool-retry-vocab" hidden><svg><use href="#i-refresh"/></svg>重试</button>
+              </div>
+              <div class="card-body">
+                <div class="tool-status" id="tool-status-vocab"></div>
+                <div class="md" id="tool-body-vocab"></div>
+              </div>
+            </article>
+
+            <article class="card section tool-section" id="tool-sec-grammar">
+              <div class="card-head">
+                <span class="chip s"><svg><use href="#i-branch"/></svg></span>
+                <div><h2>长难句拆解</h2><p class="hint">主干 · 从句 · 难点</p></div>
+                <span class="grow"></span>
+                <button type="button" class="btn btn-sm btn-ghost" id="tool-retry-grammar" hidden><svg><use href="#i-refresh"/></svg>重试</button>
+              </div>
+              <div class="card-body">
+                <div class="tool-status" id="tool-status-grammar"></div>
+                <div class="md" id="tool-body-grammar"></div>
+              </div>
+            </article>
+          </section>
+        </div>
+      </div>
+
+      <footer class="foot">
+        <div class="line">
+          <svg width="15" height="15"><use href="#i-book"/></svg>
+          <span>四六级阅读错因实验室 · 预置练习人工核对；自带题由 Qoder Cloud Agents 提供诊断</span>
+        </div>
+        <p style="margin:6px 0 0">AI 与预置内容仅供备考参考；当前作答保存在本浏览器，不涉及账号或数据库。</p>
+      </footer>
+    </section>
+
+    <!-- ==================== 参考估分 ==================== -->
+    <section class="view view-estimator" id="view-estimator" role="tabpanel" aria-labelledby="tab-estimator">
+      <div class="disclaimer-banner" role="note">
+        <svg><use href="#e-i-alert"/></svg>
+        <div><b>本结果仅为参考估算，不等于官方成绩。</b> 换算基于公开常模表的插值与经验校准，存在模型误差；最终成绩以教育部教育考试院发布为准。</div>
+      </div>
+
+      <div class="workspace">
+        <div class="input-panel">
+          <details class="card guide" open>
+            <summary>
+              <span class="ico"><svg width="18" height="18"><use href="#e-i-info"/></svg></span>
+              使用说明
+              <span class="chev"><svg width="18" height="18"><use href="#e-i-chev"/></svg></span>
+            </summary>
+            <ol>
+              <li>选择 <b>四级 / 六级</b>，填写听力与阅读各题型的<b>答对题数</b>。</li>
+              <li>写作与翻译可选 <b>自评档位</b>，或粘贴文本由 <b>AI 给出语言反馈</b>。</li>
+              <li>查看分模块<b>参考区间</b>、<b>距 425 参考目标的参考差</b>与算法限制。</li>
+              <li>可获取基于<b>内置资料库</b>的备考建议（不是个性化提分承诺）。</li>
+            </ol>
+            <div class="tip"><svg width="16" height="16"><use href="#e-i-info"/></svg><span>要判断切题或信息覆盖，需同时提供作文题目 / 翻译中文原文；缺少材料时只给语言层面反馈。</span></div>
+          </details>
+
+          <form class="card form" id="est-form" novalidate>
+            <div class="card-head">
+              <span class="chip"><svg><use href="#e-i-chart"/></svg></span>
+              <div><h2>估分表单</h2><p class="hint">按题型填写答对题数</p></div>
+            </div>
+            <div class="card-body composer">
+              <div class="seg" id="est-levelSeg" data-level="CET4" role="group" aria-label="考试级别">
+                <span class="thumb"></span>
+                <button type="button" data-level="CET4" aria-pressed="true">四级 CET-4</button>
+                <button type="button" data-level="CET6" aria-pressed="false">六级 CET-6</button>
+              </div>
+
+              <fieldset class="group">
+                <legend><svg width="16" height="16"><use href="#e-i-listen"/></svg> 听力 <span class="legend-max">满分 249</span></legend>
+                <div class="count-grid" id="est-listeningFields"></div>
+              </fieldset>
+
+              <fieldset class="group">
+                <legend><svg width="16" height="16"><use href="#e-i-read"/></svg> 阅读 <span class="legend-max">满分 249</span></legend>
+                <div class="count-grid" id="est-readingFields"></div>
+              </fieldset>
+
+              <fieldset class="group" data-mod="writing">
+                <legend><svg width="16" height="16"><use href="#e-i-write"/></svg> 写作 <span class="legend-max">满分 106.5</span></legend>
+                <div class="mode-seg" data-target="writing" role="group" aria-label="写作评分方式">
+                  <button type="button" data-mode="band" aria-pressed="true">自评档位</button>
+                  <button type="button" data-mode="ai" aria-pressed="false">AI 语言反馈</button>
+                </div>
+                <div class="band-seg" data-target="writing" role="group" aria-label="写作档位">
+                  <button type="button" data-band="low" aria-pressed="false">低档</button>
+                  <button type="button" data-band="mid" aria-pressed="true">中档</button>
+                  <button type="button" data-band="high" aria-pressed="false">高档</button>
+                </div>
+                <div class="ai-box" data-target="writing" hidden>
+                  <textarea id="est-writingText" maxlength="4000" placeholder="粘贴你的作文全文，AI 将给出 0–15 的语言反馈…"></textarea>
+                  <textarea id="est-writingPrompt" class="material-input" maxlength="2000" placeholder="可选：粘贴本次作文题目，才能判断是否切题…"></textarea>
+                  <p class="ai-hint">缺少作文题目时，只做语言反馈，不判断切题与论点覆盖。</p>
+                </div>
+              </fieldset>
+
+              <fieldset class="group" data-mod="translation">
+                <legend><svg width="16" height="16"><use href="#e-i-trans"/></svg> 翻译 <span class="legend-max">满分 106.5</span></legend>
+                <div class="mode-seg" data-target="translation" role="group" aria-label="翻译评分方式">
+                  <button type="button" data-mode="band" aria-pressed="true">自评档位</button>
+                  <button type="button" data-mode="ai" aria-pressed="false">AI 语言反馈</button>
+                </div>
+                <div class="band-seg" data-target="translation" role="group" aria-label="翻译档位">
+                  <button type="button" data-band="low" aria-pressed="false">低档</button>
+                  <button type="button" data-band="mid" aria-pressed="true">中档</button>
+                  <button type="button" data-band="high" aria-pressed="false">高档</button>
+                </div>
+                <div class="ai-box" data-target="translation" hidden>
+                  <textarea id="est-translationText" maxlength="4000" placeholder="粘贴你的翻译译文，AI 将给出 0–15 的语言反馈…"></textarea>
+                  <textarea id="est-translationSource" class="material-input" maxlength="2000" placeholder="可选：粘贴翻译中文原文，才能判断信息覆盖与漏译…"></textarea>
+                  <p class="ai-hint">缺少中文原文时，只做语言反馈，不判断信息覆盖。</p>
+                </div>
+              </fieldset>
+
+              <button type="submit" class="btn btn-primary btn-lg" id="est-estimateBtn">
+                <svg><use href="#e-i-target"/></svg><span id="est-estimateLabel">开始估分</span>
+              </button>
+              <p class="submit-note">估分即时完成；AI 语言反馈与备考建议需联网调用。</p>
+            </div>
+          </form>
+        </div>
+
+        <div class="results">
+          <div class="card empty" id="est-emptyState">
+            <svg class="art" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+              <rect x="14" y="20" width="92" height="80" rx="10" fill="var(--accent-soft)"/>
+              <rect x="26" y="62" width="14" height="26" rx="3" fill="var(--site-accent)" opacity=".55"/>
+              <rect x="46" y="48" width="14" height="40" rx="3" fill="var(--site-accent)" opacity=".75"/>
+              <rect x="66" y="36" width="14" height="52" rx="3" fill="var(--site-accent)"/>
+              <rect x="86" y="54" width="10" height="34" rx="3" fill="var(--info)" opacity=".7"/>
+              <path d="M24 34h50" stroke="var(--accent-deep)" stroke-width="3" stroke-linecap="round" opacity=".5"/>
+            </svg>
+            <h3>填写表单，查看参考估分</h3>
+            <p>基于公开常模换算给出分模块参考区间、距 425 参考目标的参考差，并按相对薄弱模块推送内置备考资料。</p>
+            <div class="chips"><span>参考区间</span><span>距目标分参考差</span><span>算法限制</span><span>内置资料建议</span></div>
+          </div>
+
+          <div class="card progress" id="est-progress">
+            <div class="row">
+              <span class="pulse"></span>
+              <span class="label" id="est-progressLabel">正在处理…</span>
+              <span class="elapsed" id="est-elapsed">0.0s</span>
+            </div>
+            <div class="bar"><i></i></div>
+          </div>
+
+          <div class="card error-card" id="est-errorCard">
+            <span class="ico"><svg width="20" height="20"><use href="#e-i-alert"/></svg></span>
+            <div>
+              <h3>处理失败</h3>
+              <p id="est-errorMessage">请稍后重试。</p>
+              <button type="button" class="btn btn-sm" id="est-errorRetryBtn"><svg><use href="#e-i-refresh"/></svg> 重试</button>
+            </div>
+          </div>
+
+          <div class="card result-bar" id="est-resultBar">
+            <div class="meta"><span class="tag" id="est-resultTag">估分完成</span><span id="est-resultMeta"></span></div>
+            <button type="button" class="btn btn-sm" id="est-recommendBtn"><svg><use href="#e-i-spark"/></svg> 获取备考建议</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="est-reestimateBtn"><svg><use href="#e-i-refresh"/></svg> 重新估分</button>
+          </div>
+
+          <section class="card section overview" id="est-overviewCard">
+            <div class="card-head">
+              <span class="chip t"><svg><use href="#e-i-target"/></svg></span>
+              <div><h2>参考估分总览</h2><p class="hint" id="est-overviewHint"></p></div>
+            </div>
+            <div class="card-body">
+              <div class="total-row">
+                <div class="total-num"><span id="est-totalScore">0</span><small>/ 710</small></div>
+                <div class="total-side">
+                  <div class="range-line">参考区间 <b id="est-totalRange">0 – 0</b></div>
+                  <div class="range-line muted">总分按各模块报道分相加，含经验校准误差</div>
+                </div>
+              </div>
+              <div class="gap-block">
+                <div class="gap-head">
+                  <span>距 425 参考目标</span>
+                  <b id="est-gapValue">—</b>
+                </div>
+                <p class="gap-note" id="est-gapNote"></p>
+                <p class="limits-note" id="est-limits"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="card section" id="est-modulesCard">
+            <div class="card-head">
+              <span class="chip o"><svg><use href="#e-i-chart"/></svg></span>
+              <div><h2>分模块参考得分</h2><p class="hint">报道分换算 · 参考估算</p></div>
+            </div>
+            <div class="card-body"><div class="module-list" id="est-moduleList"></div></div>
+          </section>
+
+          <section class="card section" id="est-aiCommentCard">
+            <div class="card-head">
+              <span class="chip v"><svg><use href="#e-i-write"/></svg></span>
+              <div><h2>AI 写译反馈</h2><p class="hint">满分各 15 分 · 缺少材料时只评语言</p></div>
+            </div>
+            <div class="card-body"><div id="est-aiCommentBody" class="ai-comments"></div></div>
+          </section>
+
+          <section class="card section" id="est-recommendCard">
+            <div class="card-head">
+              <span class="chip s"><svg><use href="#e-i-book"/></svg></span>
+              <div><h2>备考建议（基于内置资料）</h2><p class="hint">RAG 召回内置资料 · 非个性化提分承诺</p></div>
+              <div class="grow"></div>
+              <button type="button" class="btn btn-sm btn-ghost" id="est-stopRecBtn" hidden>停止</button>
+            </div>
+            <div class="card-body"><div id="est-recommendBody" class="md"></div></div>
+          </section>
+        </div>
+      </div>
+
+      <footer class="foot">
+        <div class="line"><svg width="15" height="15"><use href="#e-i-alert"/></svg> 本结果仅为参考估算，不等于官方成绩。</div>
+        <div class="line muted">换算基于公开常模表插值与经验校准 · 建议来自内置 curated 资料库</div>
+      </footer>
+    </section>
+  </main>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
