@@ -1,5 +1,4 @@
-// A representative CET-4 style reading passage with two questions, used by the
-// "加载示例" button so visitors can try the assistant immediately.
+// Original CET-4 practice passage for the reading tools.
 export const SAMPLE_TEXT = `Directions: Read the following passage and answer the questions below.
 
 In an age of laptops and tablets, many students have abandoned handwriting in favor of typing their notes. It seems efficient: typing is faster, and digital notes are easy to search and store. Yet a growing body of research suggests that this convenience comes at a hidden cost to learning.

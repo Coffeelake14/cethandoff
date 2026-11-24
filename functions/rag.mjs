@@ -43,7 +43,11 @@ export function retrieve(level, weakModules, k = 8) {
   return picked.slice(0, k).map(({ _score, ...rest }) => rest);
 }
 
-// 供 Function 把召回资源拼成可被模型引用的上下文（含编号与标题）。
+// 供 Function 把召回资源拼成可被模型引用的上下文（含资料编号、标题与来源）。
 export function formatContext(chunks) {
-  return chunks.map((c, i) => `[${i + 1}] 《${c.title}》（${c.module}/${c.type}）\n${c.text}`).join('\n\n');
+  return chunks.map((c, i) => {
+    const kind = c.source.kind === 'official' ? '官方资料' : '项目原创';
+    const url = c.source.url ? `\n来源链接：${c.source.url}` : '';
+    return `[资料 ${i + 1}] 资料编号：${c.id}\n标题：${c.title}\n来源：${c.source.title}（${kind}）${url}\n${c.text}`;
+  }).join('\n\n');
 }

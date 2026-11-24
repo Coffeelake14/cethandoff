@@ -14,7 +14,8 @@ function inline(raw) {
   s = s.replace(/`([^`]+)`/g, (_m, p) => `<code>${p}</code>`);
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-  return s;
+  return s.replace(/https:\/\/cet\.neea\.edu\.cn\/x?html1\/folder\/\d+\/\d+-\d+\.htm\b/g,
+    url => `<a href="${url}" target="_blank" rel="noopener noreferrer">中国教育考试网</a>`);
 }
 
 function splitRow(row) {

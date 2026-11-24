@@ -3,7 +3,7 @@
 // transfer (vetted bank), grade with/without materials, recommend without a
 // pass probability. Uses the credential-free fake cloud.
 import assert from 'node:assert/strict';
-import { createAppHandler } from '../functions/handler.mjs';
+import { createAppHandler, validateRecommendation } from '../functions/handler.mjs';
 import { __resetResourceCache } from '../functions/resources.mjs';
 import { consumeSSE } from '../functions/sse.mjs';
 import { computeEstimate } from '../web/engine.js';
@@ -11,8 +11,16 @@ import { createFakeCloud } from './fake-cloud.mjs';
 import { FIXTURE_SCAN_WRITING, FIXTURE_SCAN_TRANSLATION } from './fixture.mjs';
 
 __resetResourceCache();
+process.env.CET_SCAN_MODEL = 'fixture-model';
 const cloud = createFakeCloud({ delayMs: 1 });
-const handler = createAppHandler({ cloud, mode: 'local-fixture' });
+const testGate = {
+  features: { train: true, explain: true, grade: true, recommend: true, scan: true },
+  requiresVisitor: false,
+  authorize: async () => ({ ok: true }),
+  async admit() { return { ok: true, async settle() {} }; },
+  async issueVisitor() { return { ok: true, setCookie: 'cet_visitor=test; Path=/' }; },
+};
+const handler = createAppHandler({ cloud, gate: testGate });
 const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 // Each request gets its own forwarded IP so the per-IP rate limiter (12 AI
@@ -76,9 +84,8 @@ const ok = name => { passed++; console.log(`  ok  ${name}`); };
   const j = await res.json();
   assert.equal(res.status, 200);
   assert.equal(j.ok, true);
-  assert.equal(j.service, 'cet-studyhack-lab');
-  assert.equal(j.mode, 'local-fixture');
-  ok('health returns ok + lab service');
+  assert.deepEqual(j, { ok: true });
+  ok('health only confirms backend connectivity');
 }
 
 // 2. train happy path: JSON diagnosis, invented id filtered, no raw JSON deltas
@@ -159,6 +166,45 @@ const ok = name => { passed++; console.log(`  ok  ${name}`); };
   assert.ok(frames.some(f => f.type === 'done' && f.state === 'completed'));
   assert.ok(!/<!--/.test(text), 'translation has no hidden block');
   ok('explain streams translation chunk');
+}
+
+// A terminated session cannot produce a completed result or fake zero usage.
+{
+  const original = cloud.openStream;
+  let settled;
+  const capturedGate = {
+    ...testGate,
+    async admit() {
+      return { ok: true, requestId: 'local-test-request', async settle(details) { settled = details; } };
+    },
+  };
+  const interrupted = createAppHandler({ cloud, gate: capturedGate });
+  const events = [
+    { type: 'agent.message', content: [{ type: 'text', text: '图书馆。' }] },
+    { type: 'span.model_request_end', model_usage: { credits: 1 } },
+    { type: 'session.usage', total_credits: null },
+    { type: 'session.status_terminated' },
+  ];
+  try {
+    cloud.openStream = () => ({
+      body: new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')).body,
+      close() {},
+    });
+    const res = await interrupted(new Request('http://local/functions/v1/app?action=explain', {
+      method: 'POST',
+      body: JSON.stringify({ section: 'translation', text: passage }),
+    }));
+    const frames = await collect(res);
+    assert.equal(res.headers.get('x-request-id'), 'local-test-request');
+    assert.equal(frames.at(-1).state, 'partial');
+    assert.equal(frames.at(-1).usage.totalCredits, null);
+    assert.equal(frames.at(-1).usage.requestCredits, 1);
+    assert.equal(settled.status, 'partial');
+    assert.equal(settled.actualCredits, null);
+    ok('terminated translation is partial and settled with unknown actual usage');
+  } finally {
+    cloud.openStream = original;
+  }
 }
 
 // 9. explain vocab + grammar
@@ -270,18 +316,24 @@ const ok = name => { passed++; console.log(`  ok  ${name}`); };
 {
   const res = await post('recommend', { level: 'CET4', estimate });
   const frames = await collect(res);
-  const text = frames.filter(f => f.type === 'delta').map(f => f.text).join('');
-  assert.ok(text.length > 50, 'recommend streams text');
+  const text = frames.filter(f => f.type === 'replace').map(f => f.text).join('');
+  assert.ok(text.length > 50, 'recommend returns validated text');
   assert.ok(/参考区间/.test(text), 'recommend mentions reference interval');
   assert.ok(!/通过概率|通过率/.test(text), 'recommend does not mention pass probability');
+  assert.ok(/资料出处/.test(text) && /\[1\]/.test(text), 'recommend appends traceable sources');
   assert.ok(frames.some(f => f.type === 'done'));
-  ok('recommend is grounded and avoids pass probability');
+  ok('recommend is grounded, cited and avoids pass probability');
 }
 
 // 16. recommend validation
 {
   assert.equal((await post('recommend', { level: 'CET4', estimate: { total: 400 } })).status, 400);
-  ok('recommend rejects invalid estimate');
+  const sources = [{ title: '真实资料', source: { title: '真实来源', kind: 'original' } }];
+  assert.equal(validateRecommendation('没有引用任何资料。', sources), null);
+  assert.equal(validateRecommendation('引用不存在的资料[9]。', sources), null);
+  assert.equal(validateRecommendation('引用真实资料[1]，另见 https://fake.example/x。', sources), null);
+  assert.match(validateRecommendation('引用真实资料[1]。', sources), /资料出处/);
+  ok('recommend rejects missing/out-of-range citations and invented links');
 }
 
 // 17. scan transcribes a photo and forwards a real Base64 image content block

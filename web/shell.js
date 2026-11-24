@@ -1,9 +1,3 @@
-// Shared shell for the CET StudyHack app: tab navigation between the reading
-// lab and the reference estimator, plus toast / service-status helpers and the
-// single health probe. Feature modules import toast, setStatus and
-// getServiceMode from here so the header pill and toasts stay unified and the
-// UI can clearly distinguish real AI from the local fixture mode.
-
 const $ = id => document.getElementById(id);
 
 const TABS = [
@@ -11,8 +5,102 @@ const TABS = [
   { key: 'estimator', tab: 'tab-estimator', view: 'view-estimator', title: '四六级参考估分 · StudyHack' },
 ];
 
-let serviceMode = 'local';
-export function getServiceMode() { return serviceMode; }
+const FEATURE_NAMES = ['train', 'explain', 'grade', 'recommend', 'scan'];
+const listeners = new Set();
+let capabilities = { status: 'unknown', features: Object.fromEntries(FEATURE_NAMES.map(name => [name, false])) };
+let requiresVisitor = false;
+let capabilitiesPromise = null;
+let connected = false;
+
+function notifyCapabilities() {
+  const snapshot = getCapabilities();
+  for (const listener of listeners) {
+    try { listener(snapshot); } catch {}
+  }
+}
+
+export function getCapabilities() {
+  return { status: capabilities.status, features: { ...capabilities.features } };
+}
+
+export function isFeatureEnabled(name) {
+  return capabilities.status === 'ready' && capabilities.features[name] === true;
+}
+
+export function onCapabilities(listener) {
+  listeners.add(listener);
+  listener(getCapabilities());
+  return () => listeners.delete(listener);
+}
+
+async function issueVisitor() {
+  const res = await fetch('/functions/v1/app?action=visitor', {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+  });
+  if (!res.ok) {
+    const error = new Error('暂不可用，请重试。');
+    error.code = 'capability_unavailable';
+    throw error;
+  }
+}
+
+export async function refreshCapabilities() {
+  if (capabilitiesPromise) return capabilitiesPromise;
+  capabilitiesPromise = (async () => {
+    capabilities = { status: 'loading', features: { ...capabilities.features } };
+    notifyCapabilities();
+    try {
+      const res = await fetch('/functions/v1/app?action=capabilities', {
+        method: 'GET', credentials: 'same-origin', cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('capabilities_unavailable');
+      const data = await res.json();
+      const features = data?.features;
+      if (!features || typeof features !== 'object' || Array.isArray(features)) throw new Error('capabilities_invalid');
+      requiresVisitor = data.requiresVisitor === true;
+      capabilities = {
+        status: 'ready',
+        features: Object.fromEntries(FEATURE_NAMES.map(name => [name, features[name] === true])),
+      };
+    } catch {
+      capabilities = { status: 'unknown', features: { ...capabilities.features } };
+    } finally {
+      capabilitiesPromise = null;
+      notifyCapabilities();
+    }
+    return getCapabilities();
+  })();
+  return capabilitiesPromise;
+}
+
+export async function requireFeature(name) {
+  const current = getCapabilities();
+  if (current.status !== 'ready' || !current.features[name]) await refreshCapabilities();
+  if (!isFeatureEnabled(name)) {
+    const error = new Error('暂不可用，请重试。');
+    error.code = 'capability_unavailable';
+    throw error;
+  }
+  if (requiresVisitor) await issueVisitor();
+  return true;
+}
+
+const UNAVAILABLE_CODES = new Set([
+  'ai_not_configured', 'ai_access_denied', 'ai_rate_limited', 'ai_conflict',
+  'ai_initialization_conflict', 'ai_resource_repair_required', 'ai_initialization_pending',
+  'ai_initialization_rejected', 'ai_service_unavailable', 'ai_request_unknown',
+  'ai_response_invalid', 'ai_empty_result', 'ai_quota_exceeded', 'ai_generation_failed',
+  'ai_terminated', 'ai_incomplete', 'ai_timeout', 'ai_feature_unavailable',
+  'ai_quota_unavailable', 'ai_visitor_quota_exceeded', 'ai_budget_blocked',
+  'ai_issue_rate_limited', 'visitor_required', 'forbidden_origin',
+]);
+
+export function aiErrorMessage(error, fallback = '暂不可用，请重试。') {
+  const code = String(error?.code || error?.message || '');
+  if (code === 'capability_unavailable' || code.startsWith('sse_') || UNAVAILABLE_CODES.has(code)) return fallback;
+  if (error?.name === 'TypeError' || error?.name === 'AbortError') return fallback;
+  return error?.message || fallback;
+}
 
 export function toast(message, kind = 'ok') {
   const el = document.createElement('div');
@@ -37,7 +125,19 @@ function showTab(key, persist = true) {
     $(t.view).classList.toggle('active', on);
   }
   document.title = active.title;
-  if (persist) { try { localStorage.setItem('cet.tab', active.key); } catch { /* ignore */ } }
+  if (persist) { try { localStorage.setItem('cet.tab', active.key); } catch {} }
+}
+
+async function probeHealth() {
+  try {
+    const res = await fetch('/functions/v1/app?action=health', { credentials: 'same-origin', cache: 'no-store' });
+    if (!res.ok) throw new Error('health_unavailable');
+    const data = await res.json();
+    connected = Boolean(data?.ok);
+  } catch {
+    connected = false;
+  }
+  setStatus(connected ? 'ready' : 'down', connected ? '已连接' : '服务离线');
 }
 
 export function initShell() {
@@ -53,19 +153,8 @@ export function initShell() {
     });
   }
   let saved = 'reading';
-  try { const s = localStorage.getItem('cet.tab'); if (s === 'estimator') saved = 'estimator'; } catch { /* ignore */ }
+  try { const s = localStorage.getItem('cet.tab'); if (s === 'estimator') saved = 'estimator'; } catch {}
   showTab(saved, false);
-
-  fetch('/functions/v1/app?action=health', { credentials: 'same-origin' })
-    .then(r => r.ok ? r.json() : Promise.reject(new Error('bad status')))
-    .then(d => {
-      if (d && d.ok) {
-        serviceMode = d.mode === 'live' ? 'live' : 'local';
-        setStatus(serviceMode === 'live' ? 'ready' : 'local', serviceMode === 'live' ? '真实 AI 就绪' : '本地示例模式');
-      } else {
-        serviceMode = 'down';
-        setStatus('down', '服务异常');
-      }
-    })
-    .catch(() => { serviceMode = 'down'; setStatus('down', '服务离线'); });
+  void probeHealth();
+  void refreshCapabilities();
 }

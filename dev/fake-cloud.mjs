@@ -64,7 +64,7 @@ export function createFakeCloud({ delayMs = 12 } = {}) {
     getLastContent() { return lastContent; },
     getEventsPosted() { return eventsPosted; },
     async request(path, { method = 'GET', body } = {}) {
-      if (path === '/api/v1/cloud/models') return { data: [{ id: 'fixture-model', enabled: true }], has_more: false };
+      if (path === '/api/v1/cloud/models') return { data: [{ id: 'fixture-model', enabled: true, supports_vision: true }], has_more: false };
       if (method === 'POST' && path === '/api/v1/cloud/environments') return { id: `env_fixture${++counter}` };
       if (method === 'POST' && path === '/api/v1/cloud/agents') return { id: `agent_fixture${++counter}`, version: 1 };
       if (method === 'POST' && path === '/api/v1/cloud/sessions') return { id: `sess_fixture${++counter}` };

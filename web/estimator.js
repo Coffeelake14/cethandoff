@@ -1,7 +1,7 @@
 import { WEIGHTS, BANDS, computeEstimate } from './engine.js';
 import { consumeSSE } from './sse.mjs';
 import { renderMarkdown } from './markdown.js';
-import { toast } from './shell.js';
+import { aiErrorMessage, getCapabilities, isFeatureEnabled, onCapabilities, refreshCapabilities, requireFeature, toast } from './shell.js';
 import { photoFileError, transcribePhoto, confidenceLabel, highlightUncertain, wirePhotoDropPaste } from './scan.js';
 
 // All estimator element IDs are prefixed `est-` so they never collide with the
@@ -24,11 +24,16 @@ const state = {
 let estimate = null;
 let aiComments = null;
 let aiMeta = null;
+let gradeState = 'idle';
+let gradeMessage = '';
+let gradeRequested = { writing: false, translation: false };
+let moduleSources = { listening: '用户自报', reading: '用户自报', writing: '按自评估算', translation: '按自评估算' };
 let busy = false;
 let gradeAbort = null;
 let recAbort = null;
 let recRaw = '';
 let recRunning = false;
+let recState = 'idle';
 let timerId = null;
 let startedAt = 0;
 
@@ -40,6 +45,19 @@ const scanners = {};
 
 /* ---------------- photo transcription (writing / translation) ---------------- */
 function scanEl(mod, name) { return $(`${mod}Scan${name}`); }
+
+function updateScanAvailability(mod) {
+  const enabled = isFeatureEnabled('scan');
+  const box = scanEl(mod, 'Btn').closest('.scan-inline');
+  box.querySelector('.scan-entry').hidden = !enabled;
+  scanEl(mod, 'Unavailable').hidden = enabled;
+  scanEl(mod, 'CapabilityRetry').hidden = enabled || getCapabilities().status !== 'unknown';
+}
+
+function updateCapabilityUI() {
+  for (const mod of ['writing', 'translation']) updateScanAvailability(mod);
+  $('recommendBtn').title = isFeatureEnabled('recommend') ? '' : '暂不可用，请重试。';
+}
 
 function setScanStatus(mod, tone, text) {
   const el = scanEl(mod, 'Status');
@@ -65,7 +83,7 @@ function scanUsageText(res) {
   const bits = [];
   const ms = Number(res.meta?.durationMs);
   if (Number.isFinite(ms) && ms > 0) bits.push(`耗时 ${(ms / 1000).toFixed(1)} 秒`);
-  const credits = Number(res.usage?.totalCredits);
+  const credits = res.usage?.totalCredits;
   if (Number.isFinite(credits)) bits.push(`本次 ${credits} credits`);
   if (res.meta?.model) bits.push(`模型 ${res.meta.model}`);
   return bits.length ? `服务端实测：${bits.join(' · ')}` : '服务端未返回本次用量数据。';
@@ -138,7 +156,7 @@ function fillFromScan(mod, res) {
 
 async function runScan(mod, file, { bypassCache = false } = {}) {
   const s = scanners[mod];
-  if (!s || s.busy) return;
+  if (!s || s.busy || !isFeatureEnabled('scan')) return;
   s.lastFile = file;
   const { name, field } = SCAN_UI[mod];
   const textarea = $(field);
@@ -171,7 +189,7 @@ async function runScan(mod, file, { bypassCache = false } = {}) {
     if (window.innerWidth > 920) textarea.focus({ preventScroll: true });
   } catch (err) {
     if (s.controller?.signal.aborted) setScanStatus(mod, 'error', '识别超时或已取消，可重试或重新拍照。');
-    else setScanStatus(mod, 'error', err.message || '识别失败，请重拍。');
+    else setScanStatus(mod, 'error', aiErrorMessage(err));
     scanEl(mod, 'Retry').hidden = !s.lastFile;
   } finally {
     clearTimeout(timer);
@@ -183,7 +201,8 @@ async function runScan(mod, file, { bypassCache = false } = {}) {
 
 function wireScanner(mod) {
   scanners[mod] = { busy: false, lastFile: null, controller: null, rotate: 0 };
-  scanEl(mod, 'Btn').addEventListener('click', () => scanEl(mod, 'File').click());
+  scanEl(mod, 'Btn').addEventListener('click', () => { if (isFeatureEnabled('scan')) scanEl(mod, 'File').click(); });
+  scanEl(mod, 'CapabilityRetry').addEventListener('click', () => { void refreshCapabilities(); });
   scanEl(mod, 'File').addEventListener('change', e => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -211,7 +230,7 @@ function wireScanner(mod) {
     if (err) { toast(err, 'err'); return; }
     scanners[mod].rotate = 0;
     runScan(mod, file);
-  }, { onError: msg => toast(msg, 'err') });
+  }, { onError: msg => toast(msg, 'err'), enabled: () => isFeatureEnabled('scan') });
 }
 
 /* ---------------- helpers ---------------- */
@@ -311,7 +330,10 @@ function resetResultUI() {
   $('errorCard').classList.remove('show');
   for (const id of ['overviewCard', 'modulesCard', 'aiCommentCard', 'recommendCard']) $(id).classList.remove('show');
   $('recommendBody').innerHTML = '';
+  $('recommendStatus').textContent = '';
+  delete $('recommendStatus').dataset.state;
   recRaw = '';
+  recState = 'idle';
   hideProgress();
 }
 function showError(message) {
@@ -322,12 +344,15 @@ function showError(message) {
 
 function renderEstimate() {
   const e = estimate;
-  $('overviewHint').textContent = `${e.level === 'CET6' ? '六级 CET-6' : '四级 CET-4'} · 公开常模表插值 + 经验校准`;
+  $('overviewHint').textContent = `${e.level === 'CET6' ? '六级 CET-6' : '四级 CET-4'} · 公开常模表插值与项目假设`;
   $('totalScore').textContent = e.total;
   $('totalRange').textContent = `${e.range[0]} – ${e.range[1]}`;
   $('gapValue').textContent = `${e.gap >= 0 ? '+' : ''}${e.gap} 分`;
   $('gapValue').dataset.tone = e.gapTone;
-  $('gapNote').textContent = `${e.gapLabel}。参考区间 ${e.range[0]}–${e.range[1]} 也可能跨过 425，请结合区间理解。`;
+  const [rangeLow, rangeHigh] = e.range;
+  const targetInRange = rangeLow <= e.target && e.target <= rangeHigh;
+  const rangeNote = targetInRange ? `，包含 ${e.target} 参考目标` : '';
+  $('gapNote').textContent = `${e.gapLabel}。参考区间 ${rangeLow}–${rangeHigh}${rangeNote}。`;
   $('limits').textContent = e.limits;
 
   const list = $('moduleList');
@@ -344,19 +369,21 @@ function renderEstimate() {
         <span class="m-score">${m.score}<small> / ${m.max}</small></span>
       </div>
       <div class="m-bar"><i></i></div>
-      <div class="m-pct">参考区间 ${m.range[0]}–${m.range[1]} · 参考得分率约 ${pct}%</div>`;
+      <div class="m-pct">参考区间 ${m.range[0]}–${m.range[1]}<span class="m-source">模块来源：${moduleSources[m.key]}</span></div>`;
     list.appendChild(el);
     requestAnimationFrame(() => { el.querySelector('.m-bar i').style.width = `${pct}%`; });
   }
 
-  $('resultTag').textContent = '参考估分完成';
-  $('resultMeta').textContent = `${e.level === 'CET6' ? '六级' : '四级'} · 总分约 ${e.total} · 参考区间 ${e.range[0]}–${e.range[1]}`;
+  const requested = ['writing', 'translation'].filter(mod => gradeRequested[mod]);
+  const usedAI = requested.filter(mod => moduleSources[mod] === 'AI 语言反馈（参考）');
+  $('resultTag').textContent = requested.length && usedAI.length === requested.length ? 'AI 语言反馈（参考）' : '按自评估算';
+  $('resultMeta').textContent = `${e.level === 'CET6' ? '六级' : '四级'} · 总分约 ${e.total} · 参考区间 ${e.range[0]}–${e.range[1]}${requested.length && usedAI.length < requested.length ? ' · 写译部分按自评估算' : ''}`;
   $('overviewCard').classList.add('show');
   $('modulesCard').classList.add('show');
   $('resultBar').classList.add('show');
   $('recommendBtn').disabled = false;
 
-  if (aiComments) renderAiComments();
+  if (gradeRequested.writing || gradeRequested.translation) renderAiComments();
   if (window.innerWidth <= 920) $('overviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -394,9 +421,31 @@ function renderAiComments() {
   const body = $('aiCommentBody');
   body.innerHTML = '';
   let any = false;
-  for (const mod of ['writing', 'translation']) {
-    const c = aiComments[mod];
-    if (!c || c.score === null || state[mod].mode !== 'ai') continue;
+  const requested = ['writing', 'translation'].filter(mod => gradeRequested[mod] && state[mod].mode === 'ai');
+  if (requested.length && gradeState !== 'done') {
+    any = true;
+    const notice = document.createElement('div');
+    notice.className = 'grade-state';
+    const text = document.createElement('span');
+    text.textContent = gradeMessage || '暂不可用，请重试。';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-sm';
+    retry.dataset.retryGrade = 'true';
+    retry.textContent = '重试 AI 反馈';
+    notice.append(text, retry);
+    body.appendChild(notice);
+  }
+  for (const mod of requested) {
+    const c = aiComments?.[mod];
+    if (!c || !Number.isFinite(c.score)) {
+      any = true;
+      const unavailable = document.createElement('div');
+      unavailable.className = 'ai-comment ai-unavailable';
+      unavailable.innerHTML = `<div class="ac-head"><span class="ac-name">${MODULE_NAME[mod]}</span><span class="ac-score">按自评估算</span></div><p class="ac-text">AI 语言反馈暂不可用，请重试。</p>`;
+      body.appendChild(unavailable);
+      continue;
+    }
     any = true;
     const checked = c.relevance === 'checked';
     const materialName = mod === 'writing' ? '作文题目' : '中文原文';
@@ -413,6 +462,7 @@ function renderAiComments() {
       </div>
       <div class="ac-check ${checked ? 'ok' : 'warn'}">${checkText}</div>
       <p class="ac-text"></p>
+      <p class="ac-source">模块来源：AI 语言反馈（参考）</p>
       ${c.materialMissing ? `<p class="ac-missing">补填${materialName}后可判断${mod === 'writing' ? '切题与论点覆盖' : '信息覆盖与漏译'}；当前仅给语言层面反馈。</p>` : ''}
       ${gradeDetailHtml(c)}`;
     el.querySelector('.ac-text').textContent = c.comment || '';
@@ -420,7 +470,7 @@ function renderAiComments() {
   }
   if (any && aiMeta) {
     const ms = Number(aiMeta.meta?.durationMs);
-    const credits = Number(aiMeta.usage?.totalCredits);
+    const credits = aiMeta.usage?.totalCredits;
     const bits = [];
     if (Number.isFinite(ms) && ms > 0) bits.push(`评分耗时 ${(ms / 1000).toFixed(1)} 秒`);
     if (Number.isFinite(credits)) bits.push(`本次 ${credits} credits`);
@@ -435,7 +485,9 @@ function renderAiComments() {
 
 /* ---------------- AI grade ---------------- */
 async function runGrade({ writing, writingPrompt, translation, translationSource }, signal) {
+  await requireFeature('grade');
   let result = null;
+  let state = 'done';
   const res = await fetch(`${API}?action=grade`, {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -443,9 +495,12 @@ async function runGrade({ writing, writingPrompt, translation, translationSource
     signal,
   });
   if (!res.ok) {
-    let msg = 'AI 反馈请求失败。';
-    try { const j = await res.json(); if (j?.message) msg = j.message; } catch { /* ignore */ }
-    throw new Error(msg);
+    let msg = '暂不可用，请重试。';
+    let code = '';
+    try { const j = await res.json(); if (j?.message) msg = j.message; if (j?.error) code = j.error; } catch {}
+    const error = new Error(aiErrorMessage({ code }, msg));
+    error.code = code;
+    throw error;
   }
   await consumeSSE(res, frame => {
     let env; try { env = JSON.parse(frame.data); } catch { return false; }
@@ -454,11 +509,15 @@ async function runGrade({ writing, writingPrompt, translation, translationSource
       result = { writing: env.writing, translation: env.translation, usage: env.usage, meta: env.meta };
       return false;
     }
-    if (env.type === 'done') return true;
-    if (env.type === 'error') throw new Error(env.message || 'AI 反馈失败。');
+    if (env.type === 'done') { state = env.state === 'partial' ? 'partial' : 'done'; return true; }
+    if (env.type === 'error') {
+      const error = new Error(aiErrorMessage({ code: env.code }, env.message));
+      error.code = env.code || '';
+      throw error;
+    }
     return false;
   }, { signal });
-  return result;
+  return result ? { ...result, state } : null;
 }
 
 /* ---------------- main estimate flow ---------------- */
@@ -487,27 +546,46 @@ async function startEstimate() {
   aiComments = null;
   aiMeta = null;
   estimate = null;
+  gradeRequested = { writing: wAI && wText.length >= 10, translation: tAI && tText.length >= 10 };
+  gradeState = needAI ? 'loading' : 'idle';
+  gradeMessage = '';
+  moduleSources = { listening: '用户自报', reading: '用户自报', writing: '按自评估算', translation: '按自评估算' };
   if (recAbort) { recAbort.abort(); recAbort = null; }
+  recRunning = false;
+  $('stopRecBtn').hidden = true;
   resetResultUI();
   $('estimateBtn').disabled = true;
   $('estimateLabel').textContent = needAI ? 'AI 反馈中…' : '估分中…';
   $('recommendBtn').disabled = true;
 
-  let scores = null;
   if (needAI) {
     showProgress('正在准备 AI 引擎…');
     startTimer();
     gradeAbort = new AbortController();
     try {
       const result = await runGrade({ writing: wText, writingPrompt: wPrompt, translation: tText, translationSource: tSource }, gradeAbort.signal);
-      if (result) {
-        scores = { writing: result.writing, translation: result.translation };
-        aiComments = scores;
-        aiMeta = { usage: result.usage, meta: result.meta };
+      if (!result) throw new Error('暂不可用，请重试。');
+      aiComments = { writing: result.writing || null, translation: result.translation || null };
+      aiMeta = { usage: result.usage, meta: result.meta };
+      const missing = [];
+      for (const mod of ['writing', 'translation']) {
+        if (!gradeRequested[mod]) continue;
+        if (Number.isFinite(aiComments[mod]?.score)) moduleSources[mod] = 'AI 语言反馈（参考）';
+        else missing.push(MODULE_NAME[mod]);
       }
+      gradeState = result.state === 'partial' || missing.length ? 'partial' : 'done';
+      gradeMessage = gradeState === 'partial'
+        ? `AI 语言反馈未完整生成；${missing.length ? `${missing.join('、')}按自评估算，` : ''}已保留可用反馈，可重试。`
+        : '';
     } catch (err) {
-      if (gradeAbort.signal.aborted) toast('已取消 AI 反馈，改用自评档位');
-      else toast(`${err.message || 'AI 反馈失败'}，已改用自评档位`, 'err');
+      if (gradeAbort?.signal.aborted) {
+        gradeState = 'cancelled';
+        gradeMessage = '已取消 AI 语言反馈；本次按自评估算，可重试。';
+      } else {
+        gradeState = 'unavailable';
+        gradeMessage = 'AI 语言反馈暂不可用；本次按自评估算，可重试。';
+      }
+      toast(`${aiErrorMessage(err)}本次按自评估算。`, 'err');
     } finally {
       gradeAbort = null;
     }
@@ -517,11 +595,11 @@ async function startEstimate() {
     level: state.level,
     listening: { ...state.listening },
     reading: { ...state.reading },
-    writing: (wAI && scores && Number.isFinite(scores.writing?.score))
-      ? { mode: 'ai', score: scores.writing.score }
+    writing: moduleSources.writing === 'AI 语言反馈（参考）'
+      ? { mode: 'ai', score: aiComments.writing.score }
       : { mode: 'band', band: state.writing.band },
-    translation: (tAI && scores && Number.isFinite(scores.translation?.score))
-      ? { mode: 'ai', score: scores.translation.score }
+    translation: moduleSources.translation === 'AI 语言反馈（参考）'
+      ? { mode: 'ai', score: aiComments.translation.score }
       : { mode: 'band', band: state.translation.band },
   };
   estimate = computeEstimate(input);
@@ -539,20 +617,40 @@ function paintRecommend() {
   if (recRunning) html += '<span class="caret" aria-hidden="true"></span>';
   $('recommendBody').innerHTML = html;
 }
-function finishRecommend() {
+
+function setRecommendStatus(state, text) {
+  recState = state;
+  $('recommendStatus').dataset.state = state;
+  $('recommendStatus').textContent = text;
+}
+
+function finishRecommend(state, message) {
   recRunning = false;
+  recState = state;
   $('stopRecBtn').hidden = true;
   $('recommendBtn').disabled = false;
+  setRecommendStatus(state, message);
   paintRecommend();
 }
 
 async function startRecommend() {
   if (!estimate) { toast('请先完成估分', 'err'); return; }
   if (recRunning) return;
+  try {
+    await requireFeature('recommend');
+  } catch (err) {
+    $('recommendCard').classList.add('show');
+    const message = recRaw.trim() && recState === 'partial' ? `建议未完整生成；${aiErrorMessage(err)}` : aiErrorMessage(err);
+    setRecommendStatus('error', message);
+    paintRecommend();
+    toast(message, 'err');
+    return;
+  }
   recRunning = true;
   recRaw = '';
   recAbort = new AbortController();
   $('recommendCard').classList.add('show');
+  setRecommendStatus('loading', '正在生成备考建议…');
   $('recommendBody').innerHTML = '<p class="muted">正在生成备考建议…</p>';
   $('stopRecBtn').hidden = false;
   $('recommendBtn').disabled = true;
@@ -566,31 +664,39 @@ async function startRecommend() {
       signal: recAbort.signal,
     });
     if (!res.ok) {
-      let msg = '推荐请求失败。';
-      try { const j = await res.json(); if (j?.message) msg = j.message; } catch { /* ignore */ }
-      throw new Error(msg);
+      let msg = '暂不可用，请重试。';
+      let code = '';
+      try { const j = await res.json(); if (j?.message) msg = j.message; if (j?.error) code = j.error; } catch {}
+      const error = new Error(aiErrorMessage({ code }, msg));
+      error.code = code;
+      throw error;
     }
     await consumeSSE(res, frame => {
       let env; try { env = JSON.parse(frame.data); } catch { return false; }
       if (env.type === 'delta') { recRaw += env.text; paintRecommend(); return false; }
       if (env.type === 'replace') { recRaw = env.text; paintRecommend(); return false; }
-      if (env.type === 'done') { finishRecommend(); return true; }
-      if (env.type === 'error') { throw new Error(env.message || '生成失败。'); }
+      if (env.type === 'done') {
+        if (!recRaw.trim()) finishRecommend('error', '暂不可用，请重试。');
+        else finishRecommend(env.state === 'partial' ? 'partial' : 'done', env.state === 'partial' ? '建议未完整生成，已保留现有内容，可重试。' : '备考建议已生成。');
+        return true;
+      }
+      if (env.type === 'error') {
+        const error = new Error(aiErrorMessage({ code: env.code }, env.message));
+        error.code = env.code || '';
+        throw error;
+      }
       return false;
     }, { signal: recAbort.signal });
   } catch (err) {
-    if (recAbort && recAbort.signal.aborted) { finishRecommend(); toast('已停止生成'); }
-    else if (recRaw.trim()) { finishRecommend(); }
-    else {
-      recRunning = false;
-      $('stopRecBtn').hidden = true;
-      $('recommendBtn').disabled = false;
-      $('recommendBody').innerHTML = '';
-      const p = document.createElement('p');
-      p.className = 'muted';
-      p.textContent = err.message || '生成失败，请重试。';
-      $('recommendBody').appendChild(p);
-      toast(err.message || '生成失败，请重试', 'err');
+    if (recAbort?.signal.aborted) {
+      finishRecommend(recRaw.trim() ? 'partial' : 'cancelled', recRaw.trim() ? '已停止生成，建议未完整生成；已保留现有内容，可重试。' : '已停止生成，可重试。');
+      toast('已停止生成');
+    } else if (recRaw.trim()) {
+      finishRecommend('partial', `建议未完整生成：${aiErrorMessage(err)} 已保留现有内容，可重试。`);
+      toast('建议未完整生成，可重试', 'err');
+    } else {
+      finishRecommend('error', aiErrorMessage(err));
+      toast(aiErrorMessage(err), 'err');
     }
   } finally {
     recAbort = null;
@@ -620,13 +726,18 @@ $('recommendBtn').addEventListener('click', startRecommend);
 $('reestimateBtn').addEventListener('click', () => { $('form').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 $('stopRecBtn').addEventListener('click', () => { if (recAbort) recAbort.abort(); });
 $('errorRetryBtn').addEventListener('click', startEstimate);
+$('aiCommentBody').addEventListener('click', e => {
+  if (e.target.closest('[data-retry-grade]')) startEstimate();
+});
 
 /* ---------------- init ---------------- */
 loadForm();
-setLevel(state.level);
 $('writingText').value = state.writing.text;
 $('writingPrompt').value = state.writing.prompt;
 $('translationText').value = state.translation.text;
 $('translationSource').value = state.translation.source;
+setLevel(state.level);
 applyModUI('writing');
 applyModUI('translation');
+updateCapabilityUI();
+onCapabilities(updateCapabilityUI);

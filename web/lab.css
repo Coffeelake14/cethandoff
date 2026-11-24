@@ -242,6 +242,7 @@ mark { background: #fde68a; color: #7c2d12; padding: 0 3px; border-radius: 3px; 
 .tool-status[data-state="loading"] { color: var(--accent-deep); background: var(--accent-soft); display: flex; align-items: center; gap: 8px; }
 .tool-status[data-state="loading"]::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--site-accent) 30%, transparent); border-top-color: var(--site-accent); animation: spin .8s linear infinite; }
 .tool-status[data-state="done"] { color: var(--ok); background: var(--ok-soft); }
+.tool-status[data-state="partial"], .tool-status[data-state="cancelled"] { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 24%, var(--site-border)); }
 .tool-status[data-state="error"] { color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 24%, var(--site-border)); }
 
 /* estimator gap + AI feedback material tags */
@@ -252,10 +253,14 @@ mark { background: #fde68a; color: #7c2d12; padding: 0 3px; border-radius: 3px; 
 .view-estimator .gap-head b[data-tone="warn"] { color: var(--warn); }
 .view-estimator .gap-note { margin: 6px 0 10px; font-size: calc(12.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.65; }
 .view-estimator .limits-note { margin: 0; padding: 10px 12px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--site-bg) 55%, var(--site-surface)); border: 1px solid var(--site-border); font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.7; }
+.view-estimator .m-source { display: block; margin-top: 3px; color: var(--site-muted); font-size: calc(10.5px * var(--site-type, 1)); }
+.view-estimator .grade-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--site-border); background: var(--warn-soft); color: var(--warn); font-size: calc(12px * var(--site-type, 1)); line-height: 1.6; }
+.view-estimator .ai-comment.ai-unavailable { border-color: color-mix(in srgb, var(--warn) 28%, var(--site-border)); background: var(--warn-soft); }
 .view-estimator .ai-comment .ac-check { font-size: calc(11.5px * var(--site-type, 1)); font-weight: 700; padding: 2px 9px; border-radius: var(--r-pill); display: inline-block; margin-bottom: 6px; }
 .view-estimator .ai-comment .ac-check.ok { background: var(--ok-soft); color: var(--ok); }
 .view-estimator .ai-comment .ac-check.warn { background: var(--warn-soft); color: var(--warn); }
 .view-estimator .ai-comment .ac-missing { margin: 6px 0 0; font-size: calc(11.5px * var(--site-type, 1)); color: var(--warn); background: var(--warn-soft); padding: 7px 10px; border-radius: var(--r-sm); }
+.view-estimator .ai-comment .ac-source { margin: 6px 0 0; font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); }
 .view-estimator .material-input { min-height: 70px !important; background: color-mix(in srgb, var(--site-bg) 45%, var(--site-surface)) !important; }
 
 /* inline photo import (reading tool + writing / translation AI boxes) */
@@ -263,6 +268,9 @@ mark { background: #fde68a; color: #7c2d12; padding: 0 3px; border-radius: 3px; 
 .scan-inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .scan-inline-hint { font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.5; }
 .scan-inline .scan-status { margin: 0; }
+.scan-unavailable { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 9px 11px; border-radius: var(--r-sm); border: 1px dashed var(--site-border); background: color-mix(in srgb, var(--site-bg) 45%, var(--site-surface)); color: var(--site-muted); font-size: calc(11.5px * var(--site-type, 1)); line-height: 1.6; }
+.scan-unavailable[hidden] { display: none; }
+.scan-unavailable .btn { flex: 0 0 auto; }
 .scan-status[data-state="warn"] { color: var(--warn); background: var(--warn-soft); }
 .scan-status[hidden] { display: none !important; }
 .scan-preview { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--r-sm); border: 1px solid var(--site-border); background: var(--site-surface); }

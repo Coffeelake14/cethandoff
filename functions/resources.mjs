@@ -12,6 +12,8 @@
 // Two profiles coexist (reading tutor + score estimator); each keeps its own
 // scope so the existing account Agents are reused rather than recreated.
 
+import { ensureCloudResources } from './cloud-agents.mjs';
+
 function canonical(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -48,13 +50,27 @@ function pickModel(models, { vision = false, override = '' } = {}) {
     err.code = 'ai_not_configured';
     throw err;
   }
+  if (vision) {
+    if (!override || !usable.some(m => m.id === override)) {
+      const err = new Error('ai_vision_unsupported');
+      err.code = 'ai_vision_unsupported';
+      throw err;
+    }
+    const match = usable.find(m => m.id === override);
+    const verified = (() => {
+      try { return globalThis.Deno?.env.get('CET_SCAN_VERIFIED') === '1' || globalThis.process?.env?.CET_SCAN_VERIFIED === '1'; }
+      catch { return false; }
+    })();
+    if (!declaredVision(match) && !verified) {
+      const err = new Error('ai_vision_unsupported');
+      err.code = 'ai_vision_unsupported';
+      throw err;
+    }
+    return { id: override, visionDeclared: declaredVision(match), modelSource: 'verified-env' };
+  }
   if (override && pool.some(m => m.id === override)) {
     const match = pool.find(m => m.id === override);
     return { id: override, visionDeclared: declaredVision(match), modelSource: 'env' };
-  }
-  if (vision) {
-    const visual = pool.find(declaredVision);
-    if (visual) return { id: visual.id, visionDeclared: true, modelSource: 'catalog' };
   }
   const preferred = pool.find(m => /claude|sonnet|qwen-?max|qwen-?plus|gpt-?[45]|gemini.*pro|deepseek/i.test(m.id));
   const chosen = preferred || pool[0];
@@ -99,29 +115,48 @@ async function ensureOne(cloud, kind, definition, scope) {
     : { id: resource.id };
 }
 
-// profile: { envName, agentName, metadata, purpose }
-export async function ensureResources(cloud, scope, systemPrompt, profile) {
+function readEnv(name) {
+  try { return globalThis.Deno?.env.get(name) || globalThis.process?.env?.[name] || ''; } catch { return ''; }
+}
+
+// profile: { envName, agentName, metadata, purpose, modelEnv, vision }
+export async function ensureResources(cloud, scope, systemPrompt, profile, { coordinator = null } = {}) {
   let entry = cache.get(scope);
   if (!entry) { entry = { binding: null, inflight: null }; cache.set(scope, entry); }
   if (entry.binding) return entry.binding;
   if (entry.inflight) return entry.inflight;
   entry.inflight = (async () => {
     const models = await cloud.request('/api/v1/cloud/models');
-    let override = '';
-    try { override = profile.modelEnv ? globalThis.Deno?.env.get(profile.modelEnv) || '' : ''; } catch { /* no env */ }
+    const override = profile.modelEnv ? readEnv(profile.modelEnv) : '';
     const picked = pickModel(models, { vision: profile.vision === true, override });
-    const environment = await ensureOne(cloud, 'environments', {
+    const environmentDefinition = {
       name: profile.envName,
       config: { type: 'cloud' },
       metadata: { ...profile.metadata },
-    }, scope);
-    const agent = await ensureOne(cloud, 'agents', {
+    };
+    const agentDefinition = {
       name: profile.agentName,
       model: picked.id,
       system: systemPrompt,
       tools: [],
       metadata: { ...profile.metadata, purpose: profile.purpose },
-    }, scope);
+    };
+    let environment;
+    let agent;
+    if (coordinator?.withLock) {
+      const durable = await ensureCloudResources({
+        client: cloud,
+        coordinator,
+        applicationScope: scope,
+        agent: agentDefinition,
+        environment: environmentDefinition,
+      });
+      environment = { id: durable.environment_id };
+      agent = { id: durable.agent.id, version: durable.agent.version };
+    } else {
+      environment = await ensureOne(cloud, 'environments', environmentDefinition, scope);
+      agent = await ensureOne(cloud, 'agents', agentDefinition, scope);
+    }
     if (!Number.isInteger(agent.version) || agent.version < 1) {
       const err = new Error('ai_response_invalid');
       err.code = 'ai_response_invalid';

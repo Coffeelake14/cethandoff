@@ -18,6 +18,7 @@
 // deployed Deno edge runtime and on a local Node fixture runner.
 
 import { readSSE } from './sse.mjs';
+import { createClosedGate } from './gate.mjs';
 import {
   buildToolSystemPrompt, buildExplainUserPrompt,
   buildTrainSystemPrompt, buildTrainUserPrompt,
@@ -123,6 +124,7 @@ const ERROR_MESSAGES = {
   ai_terminated: '会话已结束，请重试。',
   ai_incomplete: '生成中断，请重试。',
   ai_timeout: '处理超时，内容可能不完整，请重试。',
+  ai_citation_invalid: '建议中的资料引用无法核对，请重试。',
 };
 
 function mapError(error) {
@@ -155,6 +157,12 @@ function json(payload, status = 200) {
 function jsonError(code, message, status) {
   return json({ ok: false, error: code, message }, status);
 }
+function parseCredits(value) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const credits = Number(value);
+  return Number.isFinite(credits) && credits >= 0 && credits <= Number.MAX_SAFE_INTEGER ? credits : null;
+}
+
 function clientIp(request) {
   const fwd = request.headers.get('x-forwarded-for');
   if (fwd) return fwd.split(',')[0].trim().slice(0, 64) || 'unknown';
@@ -265,6 +273,24 @@ function parseGrade(text, ctx = {}) {
   const translation = norm(obj.translation, Boolean(ctx.translationMaterial), ctx.translationText || '', false);
   if (writing.score === null && translation.score === null) return null;
   return { writing, translation };
+}
+
+// Recommendations may only cite the chunks retrieved for this request. A
+// missing, out-of-range citation or a model-invented URL invalidates the reply;
+// the handler appends the authoritative source list itself.
+export function validateRecommendation(text, sources) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (!body || !Array.isArray(sources) || !sources.length) return null;
+  if (/https?:\/\//i.test(body)) return null;
+  const citations = [...body.matchAll(/\[(\d{1,2})\]/g)].map(match => Number(match[1]));
+  if (!citations.length) return null;
+  if (citations.some(n => !Number.isInteger(n) || n < 1 || n > sources.length)) return null;
+  const list = sources.map((source, index) => {
+    const kind = source.source?.kind === 'official' ? '参考官方资料' : '项目原创';
+    const url = source.source?.url ? ` · ${source.source.url}` : '';
+    return `- [${index + 1}] ${source.title} · ${source.source?.title || '来源未标注'}（${kind}）${url}`;
+  }).join('\n');
+  return `${body}\n\n---\n**资料出处**\n${list}`;
 }
 
 // Parse the model's strict-JSON transcription. Only the visible text is kept;
@@ -482,7 +508,15 @@ function cleanOptions(input) {
   return out;
 }
 
-export function createAppHandler({ cloud, mode = 'live' }) {
+/**
+ * @param {{
+ *   cloud?: ReturnType<typeof import('./cloud-agents.mjs').createCloudAgentsClient>,
+ *   gate?: ReturnType<typeof createClosedGate> | ReturnType<typeof import('./gate.mjs').createAiGate>,
+ *   trustForwardedIp?: boolean,
+ *   resourceCoordinator?: ReturnType<typeof import('./quota.mjs').createQuotaManager>['coordinator'] | null
+ * }} options
+ */
+export function createAppHandler({ cloud, gate = createClosedGate(), trustForwardedIp = false, resourceCoordinator = null }) {
   let active = 0;
   const hits = new Map();
   // Process-local, short-lived cache of recognised text keyed by a SHA-256 of
@@ -542,29 +576,62 @@ export function createAppHandler({ cloud, mode = 'live' }) {
   function releaseSlot() { if (active > 0) active -= 1; }
 
   function guard(request) {
-    const rate = checkRate(clientIp(request));
-    if (!rate.ok) return jsonError('rate_limited', rate.message, 429);
+    if (trustForwardedIp) {
+      const rate = checkRate(clientIp(request));
+      if (!rate.ok) return jsonError('rate_limited', rate.message, 429);
+    }
     if (active >= MAX_CONCURRENT) return jsonError('busy', '当前使用人数较多，请稍后再试。', 429);
     return null;
   }
 
+  async function admit(request, action) {
+    const blocked = guard(request);
+    if (blocked) return { response: blocked };
+    active += 1;
+    let admitted;
+    try {
+      admitted = await gate.admit(request, action);
+      if (admitted.ok) return { admitted };
+      return { response: jsonError(admitted.code, admitted.message, admitted.status) };
+    } finally {
+      if (!admitted?.ok) releaseSlot();
+    }
+  }
+
   // Shared one-shot Session SSE runner.
-  //   kind 'stream' -> project incremental Markdown (explain / recommend)
+  //   kind 'stream' -> project incremental Markdown (explain)
+  //   kind 'recommend' -> validate citations before displaying anything
   //   kind 'grade'  -> collect text, parse strict JSON, emit result
   //   kind 'train'  -> collect text, parse + validate diagnosis JSON, emit result
   //   kind 'scan'   -> collect text, parse strict JSON transcription, emit result
-  function runStream(request, { prompt, title, kind, profile, systemPrompt, runningMessage, trainContext, gradeContext, scanContext, image }) {
+  function runStream(request, { admitted, prompt, title, kind, profile, systemPrompt, runningMessage, trainContext, gradeContext, scanContext, recommendSources, image }) {
     const encoder = new TextEncoder();
     const startedAt = performance.now();
     const lifetime = new AbortController();
     const onAbort = () => lifetime.abort();
+    if (request.signal?.aborted) onAbort();
     request.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => lifetime.abort(), MAX_STREAM_MS);
     let upstream = null;
-    let slotTaken = false;
     let binding = null;
     let usage = null;
     let requestCredits = null;
+    let sessionId = null;
+    let sessionRequested = false;
+    let outcome = 'failed';
+    let settled = false;
+    const settle = async () => {
+      if (settled) return;
+      settled = true;
+      const actualCredits = sessionRequested ? (usage?.totalCredits ?? null) : 0;
+      await admitted.settle({
+        actualCredits,
+        status: outcome,
+        requestId: typeof sessionId === 'string' && /^sess_[A-Za-z0-9_-]+$/.test(sessionId) ? sessionId : null,
+        model: typeof binding?.model === 'string' ? binding.model : null,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+    };
     const usageOut = () => {
       if (!usage && requestCredits === null) return null;
       return {
@@ -584,9 +651,21 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const stream = new ReadableStream({
       async start(controller) {
         let closed = false;
-        const send = obj => {
+        let terminalFrame = null;
+        const emit = obj => {
           if (closed) return;
           try { controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(obj)}\n\n`)); } catch { /* closed */ }
+        };
+        const send = obj => {
+          if (obj.type === 'done') {
+            outcome = obj.state === 'partial' ? 'partial' : 'completed';
+            obj.meta = resultMeta();
+            obj.usage = usageOut();
+          }
+          // Readers close the stream on terminal events. Finish accounting before
+          // sending one so a normal client disconnect cannot interrupt settlement.
+          if (obj.type === 'done' || obj.type === 'error') terminalFrame = obj;
+          else emit(obj);
         };
         const heartbeat = setInterval(() => {
           if (closed) return;
@@ -610,6 +689,14 @@ export function createAppHandler({ cloud, mode = 'live' }) {
               send({ type: 'result', ...parsed, usage: usageOut(), meta: resultMeta() });
               send({ type: 'done', state: 'completed' });
             } else send({ type: 'error', code: 'ai_grade_invalid', message: ERROR_MESSAGES.ai_grade_invalid });
+          } else if (kind === 'recommend') {
+            const validated = validateRecommendation(out, recommendSources);
+            if (validated) {
+              send({ type: 'replace', text: validated });
+              send({ type: 'done', state: 'completed' });
+            } else {
+              send({ type: 'error', code: 'ai_citation_invalid', message: ERROR_MESSAGES.ai_citation_invalid });
+            }
           } else if (kind === 'scan') {
             const parsed = scanContext?.mode === 'structured'
               ? parseStructuredScan(out, scanContext.target, scanContext.maxChars || MAX_ESSAY)
@@ -628,12 +715,13 @@ export function createAppHandler({ cloud, mode = 'live' }) {
           }
         };
         try {
-          active += 1;
-          slotTaken = true;
           send({ type: 'status', state: 'initializing', message: '正在准备 AI 引擎…' });
-          binding = await ensureResources(cloud, profile.scope, systemPrompt, profile);
+          binding = await ensureResources(cloud, profile.scope, systemPrompt, profile, {
+            coordinator: resourceCoordinator,
+          });
           if (lifetime.signal.aborted) throw new Error('aborted');
 
+          sessionRequested = true;
           const session = await cloud.request('/api/v1/cloud/sessions', {
             method: 'POST',
             body: {
@@ -643,7 +731,7 @@ export function createAppHandler({ cloud, mode = 'live' }) {
               metadata: { app: profile.metadata.app },
             },
           });
-          const sessionId = session?.id;
+          sessionId = session?.id;
           if (typeof sessionId !== 'string' || !/^sess_[A-Za-z0-9_-]+$/.test(sessionId)) {
             throw Object.assign(new Error('ai_response_invalid'), { code: 'ai_response_invalid' });
           }
@@ -686,19 +774,19 @@ export function createAppHandler({ cloud, mode = 'live' }) {
                 if (kind === 'stream') send({ type: 'replace', text: finalText });
               }
             } else if (t === 'session.usage') {
-              const modelCredits = Number(ev.model_credits);
-              const sandboxCredits = Number(ev.sandbox_runtime_credits);
-              const totalCredits = Number(ev.total_credits);
+              const modelCredits = parseCredits(ev.model_credits);
+              const sandboxCredits = parseCredits(ev.sandbox_runtime_credits);
+              const totalCredits = parseCredits(ev.total_credits);
               if ([modelCredits, sandboxCredits, totalCredits].some(Number.isFinite)) {
                 usage = {
-                  modelCredits: Number.isFinite(modelCredits) ? modelCredits : null,
-                  sandboxCredits: Number.isFinite(sandboxCredits) ? sandboxCredits : null,
-                  totalCredits: Number.isFinite(totalCredits) ? totalCredits : null,
+                  modelCredits: modelCredits ?? usage?.modelCredits ?? null,
+                  sandboxCredits: sandboxCredits ?? usage?.sandboxCredits ?? null,
+                  totalCredits: totalCredits ?? usage?.totalCredits ?? null,
                 };
               }
             } else if (t === 'span.model_request_end') {
-              const credits = Number(ev?.model_usage?.credits);
-              if (Number.isFinite(credits)) requestCredits = credits;
+              const credits = parseCredits(ev?.model_usage?.credits);
+              if (credits !== null) requestCredits = (requestCredits ?? 0) + credits;
             } else if (t === 'session.error') {
               // Rescheduling errors are retried by the platform; keep waiting.
               if (ev?.error?.retry_status?.type === 'retrying') continue;
@@ -709,7 +797,7 @@ export function createAppHandler({ cloud, mode = 'live' }) {
             } else if (t === 'session.status_idle' || t === 'session.thread_status_idle') {
               terminal(finalText ?? draft); ended = true; break;
             } else if (t === 'session.status_terminated' || t === 'session.deleted') {
-              terminal(finalText ?? draft); ended = true; break;
+              break;
             } else if (t === 'session.status_failed' || t === 'error') {
               send({ type: 'error', code: 'ai_generation_failed', message: ERROR_MESSAGES.ai_generation_failed });
               ended = true; break;
@@ -718,27 +806,32 @@ export function createAppHandler({ cloud, mode = 'live' }) {
           if (!ended) {
             const out = finalText ?? draft;
             if (kind === 'stream' && out && out.trim()) send({ type: 'done', state: 'partial' });
-            else terminal(out);
+            else send({ type: 'error', code: 'ai_incomplete', message: ERROR_MESSAGES.ai_incomplete });
           }
         } catch (error) {
           const { code, message } = mapError(error);
           send({ type: 'error', code, message });
         } finally {
           try { upstream?.close(); } catch { /* ignore */ }
-          if (slotTaken) { releaseSlot(); slotTaken = false; }
           request.signal?.removeEventListener('abort', onAbort);
-          finish();
+          try {
+            await settle();
+          } finally {
+            releaseSlot();
+            if (terminalFrame) emit(terminalFrame);
+            finish();
+          }
         }
       },
       cancel() {
         lifetime.abort();
         try { upstream?.close(); } catch { /* ignore */ }
-        if (slotTaken) { releaseSlot(); slotTaken = false; }
       },
     });
 
     return new Response(stream, {
       headers: {
+        ...(admitted.requestId ? { 'X-Request-Id': admitted.requestId } : {}),
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-store, no-transform',
         'Connection': 'keep-alive',
@@ -769,9 +862,10 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const rawRef = typeof payload?.attempt?.referenceAnswer === 'string' ? payload.attempt.referenceAnswer.trim().toUpperCase() : '';
     const referenceAnswer = optionKeys.has(rawRef) ? rawRef : '';
 
-    const blocked = guard(request);
-    if (blocked) return blocked;
+    const { admitted, response } = await admit(request, 'train');
+    if (!admitted) return response;
     return runStream(request, {
+      admitted,
       prompt: buildTrainUserPrompt({ level, sentences, question: stem, options, chosen, evidenceIds, confidence, referenceAnswer }),
       title: '四六级阅读错因诊断',
       kind: 'train',
@@ -796,10 +890,11 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     if (!Number.isInteger(part) || part < 1) part = 1;
     if (!Number.isInteger(total) || total < 1 || total > 50) total = 1;
     if (part > total) part = total;
-    const blocked = guard(request);
-    if (blocked) return blocked;
+    const { admitted, response } = await admit(request, 'explain');
+    if (!admitted) return response;
     const label = { translation: '翻译', vocab: '生词', grammar: '长难句' }[section];
     return runStream(request, {
+      admitted,
       prompt: buildExplainUserPrompt({ section, level, text, part, total }),
       title: `四六级阅读${label}`,
       kind: 'stream',
@@ -834,12 +929,17 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const cacheKey = `${target}:${level}:${structured ? 'structured' : 'text'}:${await imageDigest(image.bytes)}`;
     if (payload?.bypassCache !== true) {
       const hit = scanCacheGet(cacheKey);
-      if (hit) return cachedStream(hit);
+      if (hit) {
+        const auth = await gate.authorize(request, 'scan');
+        if (!auth.ok) return jsonError(auth.code, auth.message, auth.status);
+        return cachedStream(hit);
+      }
     }
-    const blocked = guard(request);
-    if (blocked) return blocked;
+    const { admitted, response } = await admit(request, 'scan');
+    if (!admitted) return response;
     const label = target === 'reading' ? '阅读材料' : target === 'translation' ? '翻译' : '作文';
     return runStream(request, {
+      admitted,
       prompt: structured
         ? buildStructuredScanUserPrompt({ target, level })
         : buildScanUserPrompt({ target, level }),
@@ -870,9 +970,10 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     if (writingPrompt.length > MAX_PROMPT_MATERIAL || translationSource.length > MAX_PROMPT_MATERIAL) {
       return jsonError('text_too_long', `题目或中文原文请控制在 ${MAX_PROMPT_MATERIAL} 字符以内。`, 413);
     }
-    const blocked = guard(request);
-    if (blocked) return blocked;
+    const { admitted, response } = await admit(request, 'grade');
+    if (!admitted) return response;
     return runStream(request, {
+      admitted,
       prompt: buildGradePrompt({ level, writing, writingPrompt, translation, translationSource }),
       title: '四六级写译评分',
       kind: 'grade',
@@ -894,17 +995,19 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const level = payload?.level === 'CET6' ? 'CET6' : 'CET4';
     const estimate = payload?.estimate;
     if (!validEstimate(estimate)) return jsonError('invalid_estimate', '估分数据无效，请先完成估分。', 400);
-    const blocked = guard(request);
-    if (blocked) return blocked;
+    const { admitted, response } = await admit(request, 'recommend');
+    if (!admitted) return response;
     const chunks = retrieve(level, estimate.weak, 8);
     const context = formatContext(chunks);
     return runStream(request, {
+      admitted,
       prompt: buildRecommendPrompt(level, estimate, context, chunks),
       title: '四六级备考推荐',
-      kind: 'stream',
+      kind: 'recommend',
       profile: ESTIMATOR_PROFILE,
       systemPrompt: buildEstimatorSystemPrompt(),
       runningMessage: '正在生成备考建议…',
+      recommendSources: chunks,
     });
   }
 
@@ -914,7 +1017,17 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const action = url.searchParams.get('action');
 
     if (request.method === 'GET' && action === 'health') {
-      return json({ ok: true, mode, service: 'cet-studyhack-lab' });
+      return json({ ok: true });
+    }
+    if (request.method === 'GET' && action === 'capabilities') {
+      return json({ ok: true, features: gate.features, requiresVisitor: gate.requiresVisitor === true });
+    }
+    if (request.method === 'POST' && action === 'visitor') {
+      const result = await gate.issueVisitor(request);
+      if (!result.ok) return jsonError(result.code, result.message, result.status);
+      const response = json({ ok: true });
+      response.headers.set('Set-Cookie', result.setCookie);
+      return response;
     }
     if (action === 'train') {
       return request.method === 'POST' ? train(request) : jsonError('method_not_allowed', '请使用 POST 提交作答。', 405);

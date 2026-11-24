@@ -1,16 +1,15 @@
 // Built-in preset exercises for the reading error-cause lab.
 //
-// Everything here is original, hand-written material. Each preset ships with:
+// Everything here is original material. Each preset ships with:
 //   - a short passage split into addressable sentences (stable ids),
-//   - one question with four options and a verified correct answer,
+//   - one question with four options and an answer checked against the passage,
 //   - the sentence ids that actually support the correct option,
 //   - trap metadata for each wrong option (error type + English contrast + hint),
 //   - a same-type transfer question on fresh material.
 //
-// These presets are labelled "预置练习 · 人工核对" in the UI. They never call a
-// model; the diagnosis is computed locally from this verified data. Only
-// user-supplied passages go through Qoder Cloud Agents. Fixture-only data lives
-// in dev/, never here.
+// The source label is "原创题 · 原文核对". Presets never call a model; the
+// diagnosis is computed locally from this data. Only user-supplied passages go
+// through Qoder Cloud Agents. Fixture-only data lives in dev/, never here.
 
 export const ERROR_LABELS = {
   scope_expansion: '范围扩大',
@@ -36,10 +35,16 @@ export const ERROR_TYPES = [
   'none',
 ];
 
+export const LAB_SOURCE_LABEL = '原创题 · 原文核对';
+
 const SCREEN_READING_TRANSFER = {
   id: 'transfer-coffee',
+  errorType: 'scope_expansion',
+  tag: ERROR_LABELS.scope_expansion,
   title: '咖啡与睡眠（同类新材料）',
   level: 'CET4',
+  sourceLabel: LAB_SOURCE_LABEL,
+  provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
   passage: [
     { id: 's1', para: 1, text: 'College students often rely on coffee to stay awake during exam week.' },
     { id: 's2', para: 1, text: 'Recent surveys show that some students drink more than three cups a day.' },
@@ -62,7 +67,7 @@ const SCREEN_READING_TRANSFER = {
     A: {
       type: 'scope_expansion',
       diff: { left: 'some students', right: 'all students' },
-      hint: '回到原文核对：喝咖啡较多的到底是部分学生还是所有学生？',
+      hint: '回到原文核对：喝咖啡较多的是部分学生还是所有学生？',
       explanation: '原文只说部分（some）学生每天喝超过三杯，选项把范围扩大到所有（all）学生，属于范围扩大。',
     },
     C: {
@@ -83,8 +88,12 @@ const SCREEN_READING_TRANSFER = {
 
 const MUSIC_TRANSFER = {
   id: 'transfer-exercise',
+  errorType: 'causal_inversion',
+  tag: ERROR_LABELS.causal_inversion,
   title: '运动与情绪（同类新材料）',
   level: 'CET4',
+  sourceLabel: LAB_SOURCE_LABEL,
+  provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
   passage: [
     { id: 's1', para: 1, text: 'Many people say that exercise improves their mood.' },
     { id: 's2', para: 1, text: 'In a small study, volunteers who walked for thirty minutes reported feeling calmer afterwards.' },
@@ -105,10 +114,10 @@ const MUSIC_TRANSFER = {
   evidence: ['s3'],
   traps: {
     A: {
-      type: 'causal_inversion',
+      type: 'not_supported',
       diff: { left: 'reduce stress', right: 'cure depression in all cases' },
       hint: '原文对“治愈抑郁”是肯定、否定还是保留？',
-      explanation: '原文明确说研究没有证明运动能治愈抑郁，选项把未经证实的结论说成事实，并夸大为 all cases。',
+      explanation: '原文明确说研究没有证明运动能治愈抑郁，选项把未经证实的结论说成事实，并夸大为 all cases，属于无中生有。',
     },
     C: {
       type: 'scope_expansion',
@@ -128,8 +137,12 @@ const MUSIC_TRANSFER = {
 
 const ONLINE_COURSE_TRANSFER = {
   id: 'transfer-screens',
+  errorType: 'attitude_shift',
+  tag: ERROR_LABELS.attitude_shift,
   title: '家长与手机（同类新材料）',
   level: 'CET4',
+  sourceLabel: LAB_SOURCE_LABEL,
+  provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
   passage: [
     { id: 's1', para: 1, text: 'At first, many parents worried that smartphones would distract their children.' },
     { id: 's2', para: 1, text: 'Some schools even asked families to limit screen time at home.' },
@@ -150,10 +163,10 @@ const ONLINE_COURSE_TRANSFER = {
   evidence: ['s3', 's4', 's5'],
   traps: {
     A: {
-      type: 'attitude_shift',
+      type: 'scope_expansion',
       diff: { left: 'both benefits and risks', right: 'completely harmless' },
       hint: '原文说的是只看到好处，还是好处与风险并存？',
-      explanation: '原文说家长开始同时看到好处和风险（both benefits and risks），选项却说完全无害，态度被推向另一个极端。',
+      explanation: '原文说家长同时看到好处和风险，选项却只保留好处并说成完全无害，把“利弊并存”扩大成“只有益处”。',
     },
     B: {
       type: 'attitude_shift',
@@ -162,10 +175,10 @@ const ONLINE_COURSE_TRANSFER = {
       explanation: '原文用 in recent years, however 表明态度已经变化，选项说仍然强烈反对，忽略了时间线的转变。',
     },
     D: {
-      type: 'attitude_shift',
+      type: 'not_supported',
       diff: { left: 'still setting daily limits', right: 'without any rules' },
       hint: '家长在认可学习类应用的同时，还保留了什么做法？',
-      explanation: '原文说家长仍会设置每日限制，选项说完全不加规则，属于过度推断。',
+      explanation: '原文说家长仍会设置每日限制，选项却说完全不设规则；原文没有支持“无需任何规则”的说法。',
     },
   },
   correctNote: 's3 表明家长同时看到益处与风险，s4 补充他们仍设每日限制，与选项 C 一致。',
@@ -175,6 +188,8 @@ export const LAB_PRESETS = [
   {
     id: 'screen-reading',
     level: 'CET4',
+    sourceLabel: LAB_SOURCE_LABEL,
+    provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
     tag: ERROR_LABELS.scope_expansion,
     errorType: 'scope_expansion',
     title: '屏幕阅读真的更差吗？',
@@ -227,6 +242,8 @@ export const LAB_PRESETS = [
   {
     id: 'music-anxiety',
     level: 'CET4',
+    sourceLabel: LAB_SOURCE_LABEL,
+    provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
     tag: ERROR_LABELS.causal_inversion,
     errorType: 'causal_inversion',
     title: '音乐让你更聪明，还是更放松？',
@@ -251,10 +268,10 @@ export const LAB_PRESETS = [
     evidence: ['s3'],
     traps: {
       A: {
-        type: 'causal_inversion',
+        type: 'not_supported',
         diff: { left: 'reduced anxiety', right: 'raised their intelligence' },
         hint: '原文是否说音乐直接提高了智力？',
-        explanation: '原文明确说没有发现音乐本身提高智力或记忆；真正起作用的是降低焦虑，选项把间接作用说成直接因果。',
+        explanation: '原文明确说没有发现音乐本身提高智力或记忆；选项把降低焦虑后帮助注意力的结论改成了直接提高智力，缺乏原文依据。',
       },
       C: {
         type: 'detail_mismatch',
@@ -263,10 +280,10 @@ export const LAB_PRESETS = [
         explanation: '原文说本已平静的学生变化很小，选项反过来说他们最需要音乐，属于细节错配。',
       },
       D: {
-        type: 'causal_inversion',
+        type: 'detail_mismatch',
         diff: { left: 'reduced anxiety', right: 'increased their memory' },
         hint: '原文对“记忆提高”的说法是肯定还是否定？',
-        explanation: '原文是否定：没有发现音乐提高记忆，选项说成提高记忆，属于因果倒置。',
+        explanation: '原文明确说没有发现音乐提高智力或记忆，选项却说记忆容量提高，与原文细节相反。',
       },
     },
     correctNote: 's3 说明音乐降低焦虑、进而帮助注意力，与选项 B 的因果链一致。',
@@ -275,6 +292,8 @@ export const LAB_PRESETS = [
   {
     id: 'online-courses',
     level: 'CET4',
+    sourceLabel: LAB_SOURCE_LABEL,
+    provenance: { kind: 'original', answerBasis: '原文逐句核对', verifiedAt: '2026-11-24' },
     tag: ERROR_LABELS.attitude_shift,
     errorType: 'attitude_shift',
     title: '老师们对网课的态度变了吗？',
@@ -311,16 +330,22 @@ export const LAB_PRESETS = [
         explanation: '原文用 Over time, however 表示态度已经改变，选项说仍然和最初一样怀疑，忽略了态度转向。',
       },
       D: {
-        type: 'attitude_shift',
+        type: 'not_supported',
         diff: { left: 'face-to-face discussion remains valuable', right: 'replace classrooms entirely' },
         hint: '原文对线下讨论的最终态度是什么？',
-        explanation: '原文说多数人仍认为面对面讨论有价值，并未主张完全取代课堂，属于过度推断。',
+        explanation: '原文只说面对面讨论仍有价值，没有主张在线课程完全取代课堂，选项属于无中生有。',
       },
     },
     correctNote: 's3 表明态度已改变，s4 说现在认可灵活性，s5 补充仍重视面对面讨论，与选项 C 对应。',
     transfer: ONLINE_COURSE_TRANSFER,
   },
 ];
+
+// 实际可练习题量：每个预置题及其 transfer 题各计一题。
+export const LAB_ITEM_COUNT = LAB_PRESETS.reduce(
+  (count, preset) => count + 1 + (preset.transfer ? 1 : 0),
+  0,
+);
 
 export function findPreset(id) {
   return LAB_PRESETS.find(p => p.id === id) || null;

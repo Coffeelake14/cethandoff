@@ -8,7 +8,7 @@
 //      what are the real latency / credits / recognition result?
 //
 // Usage:
-//   QODER_PAT=... node dev/live-vision.mjs --image dev/fixtures/page.jpg --target reading
+//   QODER_PAT=... node dev/live-vision.mjs --image page.jpg --target reading --model <model-id>
 //   QODER_PAT=... node dev/live-vision.mjs --image essay.png --target writing --model <model-id>
 //
 // CN API origin defaults to https://api.qoder.com.cn (see Qoder CN quickstart).
@@ -31,11 +31,11 @@ const MODEL_ARG = argOf('model');
 
 if (!PAT) {
   console.error('缺少 QODER_PAT。请使用个人访问令牌运行，例如：');
-  console.error('  QODER_PAT=... node dev/live-vision.mjs --image page.jpg --target reading');
+  console.error('  QODER_PAT=... node dev/live-vision.mjs --image page.jpg --target reading --model <model-id>');
   process.exit(2);
 }
-if (!IMAGE) {
-  console.error('缺少 --image。请提供一张真实试卷/作文照片。');
+if (!IMAGE || !MODEL_ARG) {
+  console.error('请用 --image 提供照片，并用 --model 指定待验证的模型 ID。');
   process.exit(2);
 }
 
@@ -84,12 +84,12 @@ console.log('可用模型（GET /api/v1/cloud/models，文档未提供视觉能�
 for (const m of list) {
   console.log(`  - ${m.id} | ${m.display_name || ''} | enabled=${m.is_enabled !== false} | price_factor=${m.price_factor ?? '-'} | max_input=${m.max_input_tokens ?? '-'}`);
 }
-const model = MODEL_ARG || list.find(m => m.is_enabled !== false)?.id;
+const model = MODEL_ARG;
 if (!model) {
   console.error('账号没有可用模型。');
   process.exit(3);
 }
-if (MODEL_ARG && !list.some(m => m.id === MODEL_ARG)) {
+if (!list.some(m => m.id === model && m.is_enabled !== false && m.enabled !== false)) {
   console.error(`--model ${MODEL_ARG} 不在当前账号的模型列表中。请从上面的 id 中选择。`);
   process.exit(3);
 }
@@ -163,6 +163,12 @@ await api(`/api/v1/cloud/sessions/${session.id}/events`, {
 
 let finalText = '';
 let draft = '';
+function readCredits(value) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const credits = Number(value);
+  return Number.isFinite(credits) && credits >= 0 ? credits : null;
+}
+
 const usage = { modelCredits: null, sandboxCredits: null, totalCredits: null, requestCredits: null };
 let sessionError = '';
 let ended = false;
@@ -176,17 +182,21 @@ for await (const frame of readSSE(stream.body, { maxFrameChars: 262144 })) {
       ? ev.content.filter(c => c?.type === 'text').map(c => c.text).join('')
       : '';
   } else if (ev.type === 'span.model_request_end') {
-    if (Number.isFinite(Number(ev.model_usage?.credits))) usage.requestCredits = Number(ev.model_usage.credits);
+    const credits = readCredits(ev.model_usage?.credits);
+    if (credits !== null) usage.requestCredits = (usage.requestCredits ?? 0) + credits;
   } else if (ev.type === 'session.usage') {
-    usage.modelCredits = Number.isFinite(Number(ev.model_credits)) ? Number(ev.model_credits) : null;
-    usage.sandboxCredits = Number.isFinite(Number(ev.sandbox_runtime_credits)) ? Number(ev.sandbox_runtime_credits) : null;
-    usage.totalCredits = Number.isFinite(Number(ev.total_credits)) ? Number(ev.total_credits) : null;
+    usage.modelCredits = readCredits(ev.model_credits) ?? usage.modelCredits;
+    usage.sandboxCredits = readCredits(ev.sandbox_runtime_credits) ?? usage.sandboxCredits;
+    usage.totalCredits = readCredits(ev.total_credits) ?? usage.totalCredits;
   } else if (ev.type === 'session.error') {
     if (ev.error?.retry_status?.type !== 'retrying') {
       sessionError = `${ev.error?.type || 'error'}: ${ev.error?.message || ''}`;
     }
-  } else if (ev.type === 'session.status_idle' || ev.type === 'session.status_terminated') {
+  } else if (ev.type === 'session.status_idle' || ev.type === 'session.thread_status_idle') {
     ended = true;
+    break;
+  } else if (ev.type === 'session.status_terminated' || ev.type === 'session.status_failed' || ev.type === 'session.deleted') {
+    sessionError = ev.type;
     break;
   }
 }
@@ -223,11 +233,14 @@ console.log(JSON.stringify({
 if (!parsed) {
   console.log('\n原始回复（前 1200 字）：\n' + text.slice(0, 1200));
 }
-console.log(parsed && !sessionError
-  ? '\nLIVE VISION PROBE: PASS'
-  : '\nLIVE VISION PROBE: FAIL — 该模型/账号未能完成结构化识图，详见上方的 sessionError 与原始回复。');
+const fields = TARGET === 'reading' ? [parsed?.passage] : [parsed?.student_answer];
+const recognized = ended && !sessionError && parsed?.kind === TARGET
+  && fields.some(value => typeof value === 'string' && value.trim());
+console.log(recognized
+  ? '\n收到结构化识图结果。请逐字核对照片，记录准确率后再放行。'
+  : '\n未收到有效的结构化识图结果。');
 
 try {
   await api(`/api/v1/cloud/sessions/${session.id}/archive`, { method: 'POST' });
 } catch { /* archiving is best-effort */ }
-process.exit(parsed && !sessionError ? 0 : 1);
+process.exit(recognized ? 0 : 1);

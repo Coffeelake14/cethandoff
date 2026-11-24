@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>四六级阅读错因实验室 · StudyHack</title>
-  <meta name="description" content="面向大学生四六级备考：阅读错因实验室（选答案、点原文证据、看错因证据卡、做同类新题）与参考估分（参考区间、距目标分参考差、写译语言反馈）。预置练习人工核对，免登录可体验；当前作答只保存在本浏览器。" />
+  <meta name="description" content="面向大学生四六级备考：阅读错因实验室（选答案、点原文证据、看错因证据卡、做同类新题）与参考估分（参考区间、距目标分参考差、写译语言反馈）。预置练习为原创题并已核对原文，免登录可体验；当前作答只保存在本浏览器。" />
   <meta name="theme-color" content="#2563eb" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Cpath d='M6 7h5a2 2 0 0 1 2 2v8a1.5 1.5 0 0 0-1.5-1.5H6zM18 7h-5a2 2 0 0 0-2 2v8a1.5 1.5 0 0 1 1.5-1.5H18z' fill='none' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -92,13 +92,13 @@
             <h2>不只看完解析，而是验证你真的学会了</h2>
             <p>选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
             <div class="lh-actions">
-              <button class="btn btn-primary btn-lg" id="labStartBtn" type="button"><svg><use href="#i-spark"/></svg>开始示例</button>
+              <button class="btn btn-primary btn-lg" id="labStartBtn" type="button"><svg><use href="#i-spark"/></svg>开始练习</button>
               <button class="btn btn-lg-ghost" id="labCustomBtn" type="button"><svg><use href="#i-file"/></svg>使用自带材料</button>
             </div>
-            <p class="lh-note">预置练习由人工核对，免登录即可走完整流程；自带题会调用真实 AI 诊断。当前作答只保存在本浏览器，不涉及账号。</p>
+            <p class="lh-note">预置练习为原创题并已核对原文，免登录即可走完整流程；自带题在 AI 可用时提供诊断。当前作答只保存在本浏览器，不涉及账号。</p>
           </div>
-          <div class="lh-facts" aria-hidden="true">
-            <div><b>3</b><span>类已打通错因</span></div>
+          <div class="lh-facts">
+            <div><b id="labItemCount"></b><span id="labItemBreakdown"></span></div>
             <div><b>证据卡</b><span>some / all 并排标记</span></div>
             <div><b>同类题</b><span>用新题验证迁移</span></div>
           </div>
@@ -108,13 +108,13 @@
           <aside class="card lab-side">
             <div class="card-head">
               <span class="chip t"><svg><use href="#i-book"/></svg></span>
-              <div><h2>选择材料</h2><p class="hint">预置练习 · 人工核对答案</p></div>
+              <div><h2>选择材料</h2><p class="hint">预置练习 · 原创题 · 原文核对</p></div>
             </div>
             <div class="card-body">
               <div class="preset-list" id="labPresetList"></div>
               <div class="side-divider"><span>或</span></div>
               <button type="button" class="btn btn-block" id="labSideCustomBtn"><svg><use href="#i-file"/></svg>使用自带材料</button>
-              <div class="mode-badge" id="labModeBadge" data-mode="local">本地示例模式</div>
+              <div class="mode-badge" id="labModeBadge" data-mode="preset">预置练习 · 原创题 · 原文核对</div>
             </div>
           </aside>
 
@@ -132,7 +132,7 @@
               <h3>先做一道，再验证你学会了什么</h3>
               <p>选择一篇预置练习或粘贴自带材料，完成「选答案 + 点依据 + 选信心」，再看短提示与错因证据卡。</p>
               <div class="chips"><span>证据定位</span><span>some / all 对照</span><span>错因诊断</span><span>同类新题</span></div>
-              <button type="button" class="btn btn-primary" id="labEmptyStart"><svg><use href="#i-spark"/></svg>开始示例</button>
+              <button type="button" class="btn btn-primary" id="labEmptyStart"><svg><use href="#i-spark"/></svg>开始练习</button>
             </div>
             <div id="labStage" class="lab-stage" hidden></div>
           </main>
@@ -170,23 +170,29 @@
                 <span class="count" id="toolCharCount">0 / 6000</span>
               </div>
               <div class="scan-inline" id="toolScanBox">
-                <div class="scan-inline-row">
-                  <button type="button" class="btn btn-sm" id="toolScanBtn"><svg><use href="#i-camera"/></svg>拍照导入原文</button>
-                  <button type="button" class="btn btn-sm btn-ghost" id="toolScanRotate" hidden>旋转 90°</button>
-                  <button type="button" class="btn btn-sm btn-ghost" id="toolScanRetry" hidden>重试识别</button>
-                  <button type="button" class="btn btn-sm btn-ghost" id="toolScanClear" hidden>移除照片</button>
-                  <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴</span>
+                <div class="scan-entry">
+                  <div class="scan-inline-row">
+                    <button type="button" class="btn btn-sm" id="toolScanBtn"><svg><use href="#i-camera"/></svg>拍照导入原文</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="toolScanRotate" hidden>旋转 90°</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="toolScanRetry" hidden>重试识别</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="toolScanClear" hidden>移除照片</button>
+                    <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴</span>
+                  </div>
+                  <input type="file" id="toolScanFile" accept="image/jpeg,image/png,image/webp" hidden />
+                  <div class="tool-status scan-status" id="toolScanStatus" role="status" aria-live="polite" hidden></div>
+                  <div class="scan-preview compact" id="toolScanPreview" hidden>
+                    <img id="toolScanImg" alt="待识别的阅读原文照片预览" />
+                    <span>照片会发送到 Qoder Cloud Agents 识别。请先遮住姓名和学号。</span>
+                  </div>
                 </div>
-                <input type="file" id="toolScanFile" accept="image/jpeg,image/png,image/webp" hidden />
-                <div class="tool-status scan-status" id="toolScanStatus" role="status" aria-live="polite" hidden></div>
-                <div class="scan-preview compact" id="toolScanPreview" hidden>
-                  <img id="toolScanImg" alt="待识别的阅读原文照片预览" />
-                  <span>照片仅用于本次识别，不会存入浏览器草稿或本站数据库。</span>
+                <div class="scan-unavailable" id="toolScanUnavailable" role="status" hidden>
+                  <span>拍照识别暂不可用，可手动输入。</span>
+                  <button type="button" class="btn btn-sm btn-ghost" id="toolScanCapabilityRetry" hidden>重试</button>
                 </div>
               </div>
-              <textarea id="toolInput" spellcheck="false" aria-label="阅读原文输入框" placeholder="在此粘贴四六级阅读原文……&#10;也可以拍照导入印刷体/手写原文。"></textarea>
+              <textarea id="toolInput" spellcheck="false" aria-label="阅读原文输入框" placeholder="在此粘贴四六级阅读原文。"></textarea>
               <div class="mini-actions">
-                <button type="button" class="btn btn-sm" id="toolSampleBtn"><svg><use href="#i-file"/></svg>加载示例</button>
+                <button type="button" class="btn btn-sm" id="toolSampleBtn"><svg><use href="#i-file"/></svg>载入原创文章</button>
                 <button type="button" class="btn btn-sm btn-ghost" id="toolClearBtn"><svg><use href="#i-trash"/></svg>清空</button>
               </div>
               <div class="tool-actions">
@@ -195,7 +201,7 @@
                 <button type="button" class="btn" id="toolGrammarBtn"><svg><use href="#i-branch"/></svg>长难句</button>
               </div>
               <p class="submit-note">按需加载 · 长材料自动分段 · 失败可单独重试</p>
-              <div class="mode-badge" id="toolModeBadge" data-mode="local">本地示例模式</div>
+              <div class="mode-badge" id="toolModeBadge" data-mode="down">AI 解析暂不可用</div>
             </div>
           </section>
 
@@ -252,9 +258,9 @@
       <footer class="foot">
         <div class="line">
           <svg width="15" height="15"><use href="#i-book"/></svg>
-          <span>四六级阅读错因实验室 · 预置练习人工核对；自带题由 Qoder Cloud Agents 提供诊断</span>
+          <span>四六级阅读错因实验室 · 预置练习为原创题并已核对原文；自带题在 AI 可用时提供诊断</span>
         </div>
-        <p style="margin:6px 0 0">AI 与预置内容仅供备考参考；当前作答保存在本浏览器，不涉及账号或数据库。</p>
+        <p style="margin:6px 0 0">阅读草稿保存在本浏览器。使用 AI 时，所提交的文字或照片会发送到 Qoder Cloud Agents。</p>
       </footer>
     </section>
 
@@ -262,7 +268,7 @@
     <section class="view view-estimator" id="view-estimator" role="tabpanel" aria-labelledby="tab-estimator">
       <div class="disclaimer-banner" role="note">
         <svg><use href="#e-i-alert"/></svg>
-        <div><b>本结果仅为参考估算，不等于官方成绩。</b> 换算基于公开常模表的插值与经验校准，存在模型误差；最终成绩以教育部教育考试院发布为准。</div>
+        <div><b>本结果仅为参考估算，不等于官方成绩。</b> 换算基于公开常模表的插值与项目假设，存在模型误差；最终成绩以教育部教育考试院发布为准。</div>
       </div>
 
       <div class="workspace">
@@ -305,7 +311,7 @@
               </fieldset>
 
               <fieldset class="group" data-mod="writing">
-                <legend><svg width="16" height="16"><use href="#e-i-write"/></svg> 写作 <span class="legend-max">满分 106.5</span></legend>
+                <legend><svg width="16" height="16"><use href="#e-i-write"/></svg> 写作 <span class="legend-max">估算上限 106</span></legend>
                 <div class="mode-seg" data-target="writing" role="group" aria-label="写作评分方式">
                   <button type="button" data-mode="band" aria-pressed="true">自评档位</button>
                   <button type="button" data-mode="ai" aria-pressed="false">AI 语言反馈</button>
@@ -317,29 +323,35 @@
                 </div>
                 <div class="ai-box" data-target="writing" hidden>
                   <div class="scan-inline">
-                    <div class="scan-inline-row">
-                      <button type="button" class="btn btn-sm" id="est-writingScanBtn"><svg><use href="#e-i-camera"/></svg>拍照识别作文</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanRotate" hidden>旋转 90°</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanRetry" hidden>重试识别</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanClear" hidden>移除照片</button>
-                      <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+                    <div class="scan-entry">
+                      <div class="scan-inline-row">
+                        <button type="button" class="btn btn-sm" id="est-writingScanBtn"><svg><use href="#e-i-camera"/></svg>拍照识别作文</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanRotate" hidden>旋转 90°</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanRetry" hidden>重试识别</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanClear" hidden>移除照片</button>
+                        <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+                      </div>
+                      <input type="file" id="est-writingScanFile" accept="image/jpeg,image/png,image/webp" hidden />
+                      <div class="tool-status scan-status" id="est-writingScanStatus" role="status" aria-live="polite" hidden></div>
+                      <div class="scan-review" id="est-writingScanReview" hidden>
+                        <div class="scan-review-img"><img id="est-writingScanReviewImg" alt="待识别的作文照片预览" /></div>
+                        <div class="scan-review-text" id="est-writingScanReviewText"></div>
+                      </div>
+                      <div class="scan-usage" id="est-writingScanUsage" hidden></div>
                     </div>
-                    <input type="file" id="est-writingScanFile" accept="image/jpeg,image/png,image/webp" hidden />
-                    <div class="tool-status scan-status" id="est-writingScanStatus" role="status" aria-live="polite" hidden></div>
-                    <div class="scan-review" id="est-writingScanReview" hidden>
-                      <div class="scan-review-img"><img id="est-writingScanReviewImg" alt="待识别的作文照片预览" /></div>
-                      <div class="scan-review-text" id="est-writingScanReviewText"></div>
+                    <div class="scan-unavailable" id="est-writingScanUnavailable" role="status" hidden>
+                      <span>拍照识别暂不可用，可手动输入。</span>
+                      <button type="button" class="btn btn-sm btn-ghost" id="est-writingScanCapabilityRetry" hidden>重试</button>
                     </div>
-                    <div class="scan-usage" id="est-writingScanUsage" hidden></div>
                   </div>
-                  <textarea id="est-writingText" maxlength="4000" placeholder="粘贴或拍照识别你的作文全文，AI 将给出 0–15 的语言反馈…"></textarea>
+                  <textarea id="est-writingText" maxlength="4000" placeholder="粘贴作文全文以获取 AI 语言反馈。"></textarea>
                   <textarea id="est-writingPrompt" class="material-input" maxlength="2000" placeholder="可选：粘贴本次作文题目，才能判断是否切题…"></textarea>
                   <p class="ai-hint">缺少作文题目时，只做语言反馈，不判断切题与论点覆盖。</p>
                 </div>
               </fieldset>
 
               <fieldset class="group" data-mod="translation">
-                <legend><svg width="16" height="16"><use href="#e-i-trans"/></svg> 翻译 <span class="legend-max">满分 106.5</span></legend>
+                <legend><svg width="16" height="16"><use href="#e-i-trans"/></svg> 翻译 <span class="legend-max">估算上限 106</span></legend>
                 <div class="mode-seg" data-target="translation" role="group" aria-label="翻译评分方式">
                   <button type="button" data-mode="band" aria-pressed="true">自评档位</button>
                   <button type="button" data-mode="ai" aria-pressed="false">AI 语言反馈</button>
@@ -351,22 +363,28 @@
                 </div>
                 <div class="ai-box" data-target="translation" hidden>
                   <div class="scan-inline">
-                    <div class="scan-inline-row">
-                      <button type="button" class="btn btn-sm" id="est-translationScanBtn"><svg><use href="#e-i-camera"/></svg>拍照识别译文</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanRotate" hidden>旋转 90°</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanRetry" hidden>重试识别</button>
-                      <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanClear" hidden>移除照片</button>
-                      <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+                    <div class="scan-entry">
+                      <div class="scan-inline-row">
+                        <button type="button" class="btn btn-sm" id="est-translationScanBtn"><svg><use href="#e-i-camera"/></svg>拍照识别译文</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanRotate" hidden>旋转 90°</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanRetry" hidden>重试识别</button>
+                        <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanClear" hidden>移除照片</button>
+                        <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+                      </div>
+                      <input type="file" id="est-translationScanFile" accept="image/jpeg,image/png,image/webp" hidden />
+                      <div class="tool-status scan-status" id="est-translationScanStatus" role="status" aria-live="polite" hidden></div>
+                      <div class="scan-review" id="est-translationScanReview" hidden>
+                        <div class="scan-review-img"><img id="est-translationScanReviewImg" alt="待识别的翻译照片预览" /></div>
+                        <div class="scan-review-text" id="est-translationScanReviewText"></div>
+                      </div>
+                      <div class="scan-usage" id="est-translationScanUsage" hidden></div>
                     </div>
-                    <input type="file" id="est-translationScanFile" accept="image/jpeg,image/png,image/webp" hidden />
-                    <div class="tool-status scan-status" id="est-translationScanStatus" role="status" aria-live="polite" hidden></div>
-                    <div class="scan-review" id="est-translationScanReview" hidden>
-                      <div class="scan-review-img"><img id="est-translationScanReviewImg" alt="待识别的翻译照片预览" /></div>
-                      <div class="scan-review-text" id="est-translationScanReviewText"></div>
+                    <div class="scan-unavailable" id="est-translationScanUnavailable" role="status" hidden>
+                      <span>拍照识别暂不可用，可手动输入。</span>
+                      <button type="button" class="btn btn-sm btn-ghost" id="est-translationScanCapabilityRetry" hidden>重试</button>
                     </div>
-                    <div class="scan-usage" id="est-translationScanUsage" hidden></div>
                   </div>
-                  <textarea id="est-translationText" maxlength="4000" placeholder="粘贴或拍照识别你的翻译译文，AI 将给出 0–15 的语言反馈…"></textarea>
+                  <textarea id="est-translationText" maxlength="4000" placeholder="粘贴英文译文以获取 AI 语言反馈。"></textarea>
                   <textarea id="est-translationSource" class="material-input" maxlength="2000" placeholder="可选：粘贴翻译中文原文，才能判断信息覆盖与漏译…"></textarea>
                   <p class="ai-hint">缺少中文原文时，只做语言反馈，不判断信息覆盖。</p>
                 </div>
@@ -375,7 +393,7 @@
               <button type="submit" class="btn btn-primary btn-lg" id="est-estimateBtn">
                 <svg><use href="#e-i-target"/></svg><span id="est-estimateLabel">开始估分</span>
               </button>
-              <p class="submit-note">估分即时完成；AI 语言反馈与备考建议需联网调用。</p>
+              <p class="submit-note">自评估分在本机计算。使用 AI 时，提交的文字、照片或估分信息会发送到 Qoder Cloud Agents。</p>
             </div>
           </form>
         </div>
@@ -429,7 +447,7 @@
                 <div class="total-num"><span id="est-totalScore">0</span><small>/ 710</small></div>
                 <div class="total-side">
                   <div class="range-line">参考区间 <b id="est-totalRange">0 – 0</b></div>
-                  <div class="range-line muted">总分按各模块报道分相加，含经验校准误差</div>
+                  <div class="range-line muted">总分为模块估算之和，区间采用项目设定的误差幅度</div>
                 </div>
               </div>
               <div class="gap-block">
@@ -462,18 +480,21 @@
           <section class="card section" id="est-recommendCard">
             <div class="card-head">
               <span class="chip s"><svg><use href="#e-i-book"/></svg></span>
-              <div><h2>备考建议（基于内置资料）</h2><p class="hint">RAG 召回内置资料 · 非个性化提分承诺</p></div>
+              <div><h2>备考建议（基于内置资料）</h2><p class="hint">按薄弱项选取资料</p></div>
               <div class="grow"></div>
               <button type="button" class="btn btn-sm btn-ghost" id="est-stopRecBtn" hidden>停止</button>
             </div>
-            <div class="card-body"><div id="est-recommendBody" class="md"></div></div>
+            <div class="card-body">
+              <div class="tool-status" id="est-recommendStatus" role="status" aria-live="polite"></div>
+              <div id="est-recommendBody" class="md"></div>
+            </div>
           </section>
         </div>
       </div>
 
       <footer class="foot">
         <div class="line"><svg width="15" height="15"><use href="#e-i-alert"/></svg> 本结果仅为参考估算，不等于官方成绩。</div>
-        <div class="line muted">换算基于公开常模表插值与经验校准 · 建议来自内置 curated 资料库</div>
+        <div class="line muted">换算采用公开常模表与项目假设 · 备考建议列有资料来源</div>
       </footer>
     </section>
   </main>

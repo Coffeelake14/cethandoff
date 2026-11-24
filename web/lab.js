@@ -10,10 +10,10 @@
 // passages go through the `train` action (real Qoder Cloud Agents) and every
 // returned sentence id / contrast word is validated against the passage before
 // anything is displayed. Current progress is saved to localStorage only.
-import { LAB_PRESETS, ERROR_LABELS, findPreset } from './lab-data.js';
+import { LAB_PRESETS, LAB_ITEM_COUNT, ERROR_LABELS, findPreset } from './lab-data.js';
 import { escapeHtml } from './markdown.js';
 import { consumeSSE } from './sse.mjs';
-import { toast, getServiceMode } from './shell.js';
+import { aiErrorMessage, isFeatureEnabled, onCapabilities, refreshCapabilities, requireFeature, toast } from './shell.js';
 import { photoFileError, transcribePhoto, confidenceLabel, highlightUncertain, wirePhotoDropPaste } from './scan.js';
 
 const $ = id => document.getElementById(id);
@@ -48,9 +48,10 @@ const customScan = {
 };
 
 /* ---------------- data shaping ---------------- */
-function normalizeTransfer(source, errorType) {
+function normalizeTransfer(source, errorType, origin = 'preset') {
   return {
     id: source.id,
+    origin,
     title: source.title,
     level: source.level || 'CET4',
     tag: source.tag || ERROR_LABELS[errorType] || '同类题',
@@ -59,7 +60,7 @@ function normalizeTransfer(source, errorType) {
     evidence: source.evidence,
     traps: source.traps || {},
     correctNote: source.correctNote || '',
-    sourceLabel: '预置同类题 · 人工核对',
+    sourceLabel: origin === 'preset' ? '预置同类题 · 原创题 · 原文核对' : '内置同类题 · 原创题 · 原文核对',
   };
 }
 
@@ -77,7 +78,7 @@ function normalizePreset(preset) {
     correctNote: preset.correctNote,
     transfer: normalizeTransfer(preset.transfer, preset.errorType),
     referenceAnswer: '',
-    sourceLabel: '预置练习 · 人工核对',
+    sourceLabel: '原创题 · 原文核对',
   };
 }
 
@@ -90,7 +91,7 @@ function normalizeCustomMaterial(raw) {
     mode: 'custom',
     level: raw.level === 'CET6' ? 'CET6' : 'CET4',
     title: '自带材料',
-    tag: '真实 AI 诊断',
+    tag: 'AI 诊断',
     sentences: raw.sentences,
     question: { stem: raw.question.stem, options, answer: '' },
     evidence: [],
@@ -98,7 +99,7 @@ function normalizeCustomMaterial(raw) {
     correctNote: '',
     transfer: null,
     referenceAnswer: raw.referenceAnswer || '',
-    sourceLabel: '自带材料 · 真实 AI 诊断',
+    sourceLabel: '自带材料 · AI 诊断',
   };
 }
 
@@ -237,6 +238,10 @@ function saveState() {
   } catch { /* storage full */ }
 }
 
+function isCloudRequestId(requestId) {
+  return typeof requestId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(requestId);
+}
+
 function restoreState() {
   let saved;
   try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return false; }
@@ -252,12 +257,13 @@ function restoreState() {
   if (saved.draft) state.draft = { choice: saved.draft.choice || '', evidence: Array.isArray(saved.draft.evidence) ? saved.draft.evidence.slice(0, 3) : [], confidence: saved.draft.confidence || 'medium' };
   state.attempt = saved.attempt || null;
   state.reanswer = saved.reanswer || null;
-  state.pendingDiagnosis = saved.pendingDiagnosis || null;
-  state.diagnosis = saved.diagnosis || null;
+  const canRestore = diagnosis => state.mode === 'preset' || isCloudRequestId(diagnosis?.requestId);
+  state.pendingDiagnosis = canRestore(saved.pendingDiagnosis) ? saved.pendingDiagnosis || null : null;
+  state.diagnosis = canRestore(saved.diagnosis) ? saved.diagnosis || null : null;
   state.awaiting = Boolean(saved.awaiting);
-  if (saved.transfer && saved.transfer.item) {
+  if (saved.transfer?.item && (state.mode === 'preset' || state.diagnosis)) {
     state.transfer = {
-      item: saved.transfer.item,
+      item: normalizeTransfer(saved.transfer.item, state.diagnosis?.error_type, state.mode === 'preset' ? 'preset' : 'ai'),
       draft: saved.transfer.draft || { choice: '', evidence: [], confidence: 'medium' },
       attempt: saved.transfer.attempt || null,
       diagnosis: saved.transfer.diagnosis || null,
@@ -366,12 +372,13 @@ function answerHtml() {
   const m = state.material;
   const d = state.draft;
   const reanswer = state.awaiting;
-  const modeLabel = m.mode === 'preset' ? m.sourceLabel : `${m.sourceLabel}${getServiceMode() === 'live' ? '' : '（当前为本地假 AI）'}`;
+  const aiUnavailable = m.mode === 'custom' && !isFeatureEnabled('train');
   return `
-    ${stageHead(modeLabel, m.title)}
+    ${stageHead(m.sourceLabel, m.title)}
     ${stepBar(reanswer ? 4 : 2)}
+    ${aiUnavailable ? '<div class="lab-error" role="alert"><b>暂不可用</b><p>AI 诊断暂不可用，请重试。</p><button type="button" class="btn btn-sm" data-act="capabilities-retry"><svg><use href="#i-refresh"/></svg>重试</button></div>' : ''}
     ${state.error ? `<div class="lab-error" role="alert"><b>诊断失败</b><p>${escapeHtml(state.error)}</p><button type="button" class="btn btn-sm" data-act="retry-train"><svg><use href="#i-refresh"/></svg>重试诊断</button></div>` : ''}
-    ${state.loading ? `<div class="lab-loading"><span class="spin"></span>${escapeHtml(state.loadingMsg || '正在调用真实 AI 核对你的选项与依据…')}</div>` : ''}
+    ${state.loading ? `<div class="lab-loading"><span class="spin"></span>${escapeHtml(state.loadingMsg || '正在核对你的选项与依据…')}</div>` : ''}
     ${reanswer ? `<div class="hint-banner"><span class="tag warn">首答短提示</span><p>${escapeHtml(state.pendingDiagnosis?.hint || '回到原文核对你的依据。')}</p></div>` : ''}
     <section class="card stage-card">
       <div class="card-head">
@@ -389,8 +396,8 @@ function answerHtml() {
         ${evidencePicker(d)}
         <div class="conf-label">你对这个答案的信心程度</div>
         ${confidenceRow(d)}
-        <button type="button" class="btn btn-primary btn-lg" data-act="submit" ${state.loading ? 'disabled' : ''}>
-          <svg><use href="#i-spark"/></svg>${state.loading ? '正在诊断…' : reanswer ? '提交重答并查看结果' : '提交并查看短提示'}
+        <button type="button" class="btn btn-primary btn-lg" data-act="submit" ${state.loading || aiUnavailable ? 'disabled' : ''}>
+          <svg><use href="#i-spark"/></svg>${aiUnavailable ? '暂不可用' : state.loading ? '正在诊断…' : reanswer ? '提交重答并查看结果' : '提交并查看短提示'}
         </button>
         <p class="submit-note">${reanswer ? '提交后会展示正确项、你的证据、正确证据和错因。' : '先给不透露答案的短提示，重答后才展示正确项与错因。'}</p>
       </div>
@@ -494,6 +501,13 @@ function evidenceCard(diagnosis, material) {
   </div>`;
 }
 
+function judgementSourceLabel(material, diagnosis) {
+  if (diagnosis.source === 'ai') {
+    return material.referenceAnswer ? '用户提供的参考答案 · AI 诊断' : '答案与错因由 AI 判断';
+  }
+  return '答案与证据：原创题原文核对';
+}
+
 function resultHtml(isTransfer = false) {
   const material = isTransfer ? state.transfer.item : state.material;
   const diagnosis = isTransfer ? state.transfer.diagnosis : state.diagnosis;
@@ -513,7 +527,7 @@ function resultHtml(isTransfer = false) {
       <span class="v-sub">正确项 <b>${escapeHtml(diagnosis.correct_option)}</b>：${escapeHtml(correctText)}</span>
     </div>
     ${reanswer ? `<div class="v-re">重答 <b>${escapeHtml(reanswer.choice)}</b> ${reOk ? '正确' : '仍错误'}</div>` : ''}
-    <div class="v-meta">信心 ${CONF_LABEL[attempt.confidence] || '—'} · ${alignmentLabel(diagnosis)} · 错因诊断基于首答</div>
+    <div class="v-meta">信心 ${CONF_LABEL[attempt.confidence] || '—'} · ${alignmentLabel(diagnosis)} · 错因诊断基于首答<br>题目 ID：${escapeHtml(material.id)} · 原文证据 ID：${escapeHtml(diagnosis.correct_evidence_ids.join(' / ') || '无')} · 判断来源：${escapeHtml(judgementSourceLabel(material, diagnosis))}</div>
   </div>`;
 
   const warning = wrongEvidence
@@ -532,7 +546,7 @@ function resultHtml(isTransfer = false) {
   </div>`;
 
   return `
-    ${stageHead(isTransfer ? '同类新材料 · 用预置/核过题目验证' : material.sourceLabel, isTransfer ? state.transfer.item.title : material.title)}
+    ${stageHead(material.sourceLabel, isTransfer ? state.transfer.item.title : material.title)}
     ${stepBar(isTransfer ? 5 : 4)}
     ${verdict}
     ${warning}
@@ -633,9 +647,11 @@ function summaryAdvice() {
   const fixed = re && re.choice === d.correct_option;
   if (d.answer_correct && d.alignment === 'aligned') return '本次首答正确且依据对齐；可以换一篇更长的材料验证稳定性。';
   if (d.answer_correct && d.alignment !== 'aligned') return '本次答案对了，但依据没落在关键句上；下次先定位关键句再选项。';
-  if (fixed && tr?.answer_correct) return '本次你先错后改对，并在同类新题上迁移成功；继续坚持“先找依据再选”。';
-  if (fixed) return '本次重答已修正，但同类题仍有偏差；回到原文逐句核对数量、因果和态度词。';
-  return '本次首答与重答仍有偏差；建议先看证据卡里的英文差异，再重做同类题。';
+  if (fixed && tr?.answer_correct && tr.alignment === 'aligned') return '本次你先错后改对，并在同类新题上迁移成功；继续坚持“先找依据再选”。';
+  if (fixed && tr) return '本次重答已修正，但同类题仍有偏差；回到原文逐句核对数量、因果和态度词。';
+  if (fixed) return '本次重答已修正；同类题尚未完成，可继续做一道同类题验证迁移。';
+  if (re) return '本次首答与重答仍有偏差；建议先看证据卡里的英文差异，再重做同类题。';
+  return '本次首答仍有偏差；建议先看证据卡里的英文差异，再重答或重做同类题。';
 }
 
 function summaryHtml() {
@@ -648,6 +664,8 @@ function summaryHtml() {
     <div class="fact-list">
       ${facts.map(f => `<div class="fact ${f.tone}"><span class="fact-label">${escapeHtml(f.label)}</span><span class="fact-text">${escapeHtml(f.text)}</span></div>`).join('')}
     </div>
+    <div class="summary-note">题目 ID：${escapeHtml(state.material?.id || '—')} · 原文证据 ID：${escapeHtml(state.diagnosis?.correct_evidence_ids.join(' / ') || '无')} · 判断来源：${escapeHtml(state.diagnosis ? judgementSourceLabel(state.material, state.diagnosis) : '—')}</div>
+    ${state.transfer?.diagnosis ? `<div class="summary-note">同类题 ID：${escapeHtml(state.transfer.item.id)} · 原文证据 ID：${escapeHtml(state.transfer.diagnosis.correct_evidence_ids.join(' / ') || '无')} · 判断来源：${escapeHtml(judgementSourceLabel(state.transfer.item, state.transfer.diagnosis))}</div>` : ''}
     <div class="advice-card"><span class="tag t">下一步</span><p>${escapeHtml(advice)}</p></div>
     <div class="stage-actions">
       <button type="button" class="btn btn-primary" data-act="pick"><svg><use href="#i-book"/></svg>再练一篇</button>
@@ -665,7 +683,7 @@ function customScanPreviewHtml() {
   if (!customScan.preview || customScan.doc) return '';
   return `<div class="scan-preview compact" id="lab-scan-preview">
       <img id="lab-scan-img" src="${customScan.preview}" alt="待识别的原文照片预览" />
-      <span>照片仅用于本次识别，不会存入浏览器草稿或本站数据库。</span>
+      <span>照片会发送到 Qoder Cloud Agents 识别。请先遮住姓名和学号。</span>
     </div>`;
 }
 
@@ -693,7 +711,7 @@ function customQuestionsHtml() {
       <div class="scan-q-actions">
         ${questions.map((q, i) => `<button type="button" class="scan-q-btn${i === customScan.qIndex ? ' active' : ''}" data-act="custom-q" data-idx="${i}">第 ${i + 1} 题${q.no ? `（${escapeHtml(q.no)}）` : ''}</button>`).join('')}
       </div>
-      <p class="scan-review-note">导入后仍可在下方修改题干、选项与参考答案。</p>
+      <p class="scan-review-note">导入后仍可在下方修改题干、选项与用户提供的参考答案。</p>
     </div>`;
 }
 
@@ -702,7 +720,7 @@ function customScanUsage(res) {
   const bits = [];
   const ms = Number(res.meta?.durationMs);
   if (Number.isFinite(ms) && ms > 0) bits.push(`${(ms / 1000).toFixed(1)}s`);
-  const credits = Number(res.usage?.totalCredits);
+  const credits = res.usage?.totalCredits;
   if (Number.isFinite(credits)) bits.push(`${credits} credits`);
   return bits.join(' · ');
 }
@@ -772,7 +790,7 @@ function resetCustomScan() {
 }
 
 async function runCustomScan(file, { bypassCache = false } = {}) {
-  if (customScan.busy) return;
+  if (customScan.busy || !isFeatureEnabled('scan')) return;
   customScan.lastFile = file;
   const form = state.customForm || blankCustomForm();
   if (String(form.text || '').trim() && !window.confirm('识别结果会替换当前原文与题目，继续吗？')) return;
@@ -818,7 +836,7 @@ async function runCustomScan(file, { bypassCache = false } = {}) {
     toast('已导入原文，可先校对');
   } catch (err) {
     if (customScan.controller?.signal.aborted) setCustomScanStatus('error', '识别超时或已取消，可重试或重新拍照。', !!customScan.lastFile);
-    else setCustomScanStatus('error', err.message || '识别失败，请重拍。', !!customScan.lastFile);
+    else setCustomScanStatus('error', aiErrorMessage(err), !!customScan.lastFile);
   } finally {
     clearTimeout(timer);
     customScan.busy = false;
@@ -829,8 +847,10 @@ async function runCustomScan(file, { bypassCache = false } = {}) {
 
 function customHtml() {
   const f = state.customForm || blankCustomForm();
+  const scanEnabled = isFeatureEnabled('scan');
+  const trainEnabled = isFeatureEnabled('train');
   return `
-    ${stageHead('自带材料 · 真实 AI 诊断', '粘贴一篇阅读与一道题')}
+    ${stageHead('自带材料 · AI 诊断', '粘贴一篇阅读与一道题')}
     ${stepBar(2)}
     <section class="card stage-card">
       <div class="card-body custom-form">
@@ -844,17 +864,19 @@ function customHtml() {
         </div>
         <label class="cf-label" for="lab-custom-text">阅读原文 <span class="muted">（按句号等自动切句，最多 60 句）</span></label>
         <div class="scan-inline">
-          <div class="scan-inline-row">
-            <button type="button" class="btn btn-sm" data-act="custom-scan"${customScan.busy ? ' disabled' : ''}><svg><use href="#i-camera"/></svg>拍照导入原文与题目</button>
-            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-rotate"${customScan.preview ? '' : ' hidden'}>旋转 90°</button>
-            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-retry"${customScan.retry ? '' : ' hidden'}>重试识别</button>
-            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-clear"${customScan.preview ? '' : ' hidden'}>移除照片</button>
-            <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
-          </div>
-          <input type="file" id="lab-scan-file" accept="image/jpeg,image/png,image/webp" hidden />
-          ${customScanStatusHtml()}
-          ${customScanPreviewHtml()}
-          ${customScanReviewHtml()}
+          ${scanEnabled ? `<div class="scan-entry">
+            <div class="scan-inline-row">
+              <button type="button" class="btn btn-sm" data-act="custom-scan"${customScan.busy ? ' disabled' : ''}><svg><use href="#i-camera"/></svg>拍照导入原文与题目</button>
+              <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-rotate"${customScan.preview ? '' : ' hidden'}>旋转 90°</button>
+              <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-retry"${customScan.retry ? '' : ' hidden'}>重试识别</button>
+              <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-clear"${customScan.preview ? '' : ' hidden'}>移除照片</button>
+              <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+            </div>
+            <input type="file" id="lab-scan-file" accept="image/jpeg,image/png,image/webp" hidden />
+            ${customScanStatusHtml()}
+            ${customScanPreviewHtml()}
+            ${customScanReviewHtml()}
+          </div>` : '<div class="scan-unavailable" role="status"><span>拍照识别暂不可用，可手动输入。</span><button type="button" class="btn btn-sm btn-ghost" data-act="capabilities-retry">重试</button></div>'}
         </div>
         <textarea id="lab-custom-text" data-field="text" maxlength="12000" placeholder="粘贴英文原文，或拍照导入……">${escapeHtml(f.text)}</textarea>
         ${customQuestionsHtml()}
@@ -862,13 +884,14 @@ function customHtml() {
         <input id="lab-custom-stem" data-field="stem" maxlength="500" value="${escapeHtml(f.stem)}" placeholder="例如：What is the main idea of the passage?" />
         <span class="cf-label">四个选项</span>
         ${['A', 'B', 'C', 'D'].map(k => `<div class="cf-opt"><span>${k}</span><input data-field="opt-${k}" maxlength="300" value="${escapeHtml(f.options[k] || '')}" placeholder="选项 ${k}" /></div>`).join('')}
-        <label class="cf-label" for="lab-custom-answer">参考答案 <span class="muted">（可选；填写后会以此为准核对）</span></label>
+        <label class="cf-label" for="lab-custom-answer">用户提供的参考答案 <span class="muted">（可选；填写后会以此为准核对）</span></label>
         <select id="lab-custom-answer" data-field="answer">
-          <option value="" ${!f.answer ? 'selected' : ''}>不确定，让 AI 判断</option>
+          <option value="" ${!f.answer ? 'selected' : ''}>无参考答案，AI 判断</option>
           ${['A', 'B', 'C', 'D'].map(k => `<option value="${k}" ${f.answer === k ? 'selected' : ''}>${k}</option>`).join('')}
         </select>
-        <button type="button" class="btn btn-primary btn-lg" data-act="start-custom"><svg><use href="#i-target"/></svg>进入作答</button>
-        <p class="submit-note">自带题会调用真实 AI；诊断只引用你原文中的句子 ID，找不到的引句不会展示。</p>
+        <button type="button" class="btn btn-primary btn-lg" data-act="start-custom" ${trainEnabled ? '' : 'disabled'}>${trainEnabled ? '<svg><use href="#i-target"/></svg>进入作答' : '暂不可用'}</button>
+        <p class="submit-note">${trainEnabled ? '自带题会调用 AI；诊断只引用你原文中的句子 ID，找不到的引句不会展示。' : 'AI 暂不可用，请重试。'}</p>
+        ${trainEnabled ? '' : '<button type="button" class="btn btn-sm" data-act="capabilities-retry"><svg><use href="#i-refresh"/></svg>重试</button>'}
       </div>
     </section>`;
 }
@@ -1034,6 +1057,7 @@ function splitSentences(text) {
 }
 
 function startCustom() {
+  if (!isFeatureEnabled('train')) { toast('暂不可用，请重试。', 'err'); render(); return; }
   const f = state.customForm || blankCustomForm();
   const text = String(f.text || '').trim();
   const stem = String(f.stem || '').trim();
@@ -1070,13 +1094,15 @@ function validateAttempt(draft) {
 }
 
 async function submitCustomTrain() {
+  if (!isFeatureEnabled('train')) { state.error = '暂不可用，请重试。'; render(); return; }
   const m = state.material;
   const attempt = state.attempt;
   state.loading = true;
-  state.loadingMsg = '正在调用真实 AI 核对你的选项与依据…';
+  state.loadingMsg = '正在核对你的选项与依据…';
   state.error = '';
   render();
   try {
+    await requireFeature('train');
     const res = await fetch('/functions/v1/app?action=train', {
       method: 'POST',
       credentials: 'same-origin',
@@ -1096,9 +1122,12 @@ async function submitCustomTrain() {
       }),
     });
     if (!res.ok) {
-      let msg = '诊断请求失败，请稍后重试。';
-      try { const j = await res.json(); if (j?.message) msg = j.message; } catch { /* ignore */ }
-      throw new Error(msg);
+      let msg = '暂不可用，请重试。';
+      let code = '';
+      try { const j = await res.json(); if (j?.message) msg = j.message; if (j?.error) code = j.error; } catch {}
+      const error = new Error(aiErrorMessage({ code }, msg));
+      error.code = code;
+      throw error;
     }
     let result = null;
     let failed = '';
@@ -1108,19 +1137,21 @@ async function submitCustomTrain() {
       if (env.type === 'status') { if (env.message) state.loadingMsg = env.message; return false; }
       if (env.type === 'result') { result = env; return false; }
       if (env.type === 'done') return true;
-      if (env.type === 'error') { failed = env.message || 'AI 诊断失败'; return true; }
+      if (env.type === 'error') { failed = aiErrorMessage({ code: env.code }, env.message); return true; }
       return false;
     });
     if (failed) throw new Error(failed);
     if (!result) throw new Error('AI 未返回诊断结果，请重试。');
     const normalized = normalizeDiagnosis(result, m, attempt);
     if (!normalized) throw new Error('AI 未给出可核对的正确项，请重试。');
+    const requestId = res.headers.get('x-request-id');
+    if (isCloudRequestId(requestId)) normalized.requestId = requestId;
     state.pendingDiagnosis = normalized;
     state.loading = false;
     setScreen('hint');
   } catch (err) {
     state.loading = false;
-    state.error = err.message || '诊断失败，请重试。';
+    state.error = aiErrorMessage(err);
     saveState();
     render();
   }
@@ -1128,6 +1159,7 @@ async function submitCustomTrain() {
 
 function submitAnswer() {
   if (state.loading) return;
+  if (state.mode === 'custom' && !isFeatureEnabled('train')) { toast('暂不可用，请重试。', 'err'); return; }
   if (state.awaiting) {
     const draft = { ...state.draft, evidence: state.draft.evidence.slice() };
     if (!validateAttempt(draft)) return;
@@ -1181,6 +1213,11 @@ async function loadTransfer() {
     setScreen('transfer');
     return;
   }
+  if (!isFeatureEnabled('train')) {
+    state.transfer = { ...base, error: '暂不可用，请重试。' };
+    setScreen('transfer');
+    return;
+  }
   state.transfer = { ...base, loading: true };
   setScreen('transfer');
   try {
@@ -1191,14 +1228,14 @@ async function loadTransfer() {
       body: JSON.stringify({ errorType: wanted, seed: Date.now() }),
     });
     const j = await res.json().catch(() => null);
-    if (!res.ok || !j?.ok || !j.item) throw new Error(j?.message || '同类题加载失败');
-    state.transfer.item = normalizeTransfer(j.item, wanted);
+    if (!res.ok || !j?.ok || !j.item) throw new Error(aiErrorMessage({ code: j?.error }, j?.message));
+    state.transfer.item = normalizeTransfer(j.item, wanted, 'ai');
     state.transfer.loading = false;
     saveState();
     render();
   } catch (err) {
     state.transfer.loading = false;
-    state.transfer.error = err.message || '同类题加载失败';
+    state.transfer.error = aiErrorMessage(err, '同类题加载失败，请重试。');
     render();
   }
 }
@@ -1266,17 +1303,18 @@ function updateLabModeBadge() {
   const el = $('labModeBadge');
   if (!el) return;
   if (state.mode === 'custom') {
-    const mode = getServiceMode();
-    if (mode === 'live') { el.textContent = '自带题 · 真实 AI（Qoder Cloud Agents）'; el.dataset.mode = 'live'; }
-    else if (mode === 'down') { el.textContent = '自带题 · 服务离线'; el.dataset.mode = 'down'; }
-    else { el.textContent = '自带题 · 真实 AI 路径（本地为假 AI 夹具）'; el.dataset.mode = 'local'; }
+    const enabled = isFeatureEnabled('train');
+    el.textContent = enabled ? '自带题 · AI 诊断可用' : '自带题 · AI 诊断暂不可用';
+    el.dataset.mode = enabled ? 'live' : 'down';
   } else {
-    el.textContent = '预置练习 · 人工核对（不调用 AI）';
+    el.textContent = '预置练习 · 原创题 · 原文核对';
     el.dataset.mode = 'preset';
   }
 }
 
 function renderPresetList() {
+  $('labItemCount').textContent = `${LAB_ITEM_COUNT} 道原创练习`;
+  $('labItemBreakdown').textContent = `${LAB_PRESETS.length} 道主练习 · ${LAB_ITEM_COUNT - LAB_PRESETS.length} 道同类题`;
   $('labPresetList').innerHTML = LAB_PRESETS.map(p => `
     <button type="button" class="preset" data-id="${p.id}">
       <span class="preset-top"><span class="preset-tag">${escapeHtml(p.tag)}</span><span class="preset-lv">${p.level === 'CET6' ? '六级' : '四级'}</span></span>
@@ -1318,7 +1356,8 @@ labStage.addEventListener('click', e => {
   if (act === 'pick') { goPick(); return; }
   if (act === 'start-custom') { startCustom(); return; }
   if (act === 'custom-level') { state.customForm.level = btn.dataset.level === 'CET6' ? 'CET6' : 'CET4'; saveState(); render(); return; }
-  if (act === 'custom-scan') { $('lab-scan-file')?.click(); return; }
+  if (act === 'capabilities-retry') { void refreshCapabilities(); return; }
+  if (act === 'custom-scan') { if (isFeatureEnabled('scan')) $('lab-scan-file')?.click(); return; }
   if (act === 'custom-scan-rotate') {
     if (customScan.busy || !customScan.lastFile) return;
     customScan.rotate = (customScan.rotate + 90) % 360;
@@ -1366,7 +1405,7 @@ wirePhotoDropPaste(labStage, file => {
   if (err) { toast(err, 'err'); return; }
   customScan.rotate = 0;
   runCustomScan(file);
-}, { onError: msg => toast(msg, 'err') });
+}, { onError: msg => toast(msg, 'err'), enabled: () => state.screen === 'custom' && isFeatureEnabled('scan') });
 
 /* ---------------- sub-panel nav ---------------- */
 function showPanel(which, persist = true) {
@@ -1381,11 +1420,15 @@ $('subtab-lab').addEventListener('click', () => showPanel('lab'));
 $('subtab-tool').addEventListener('click', () => showPanel('tool'));
 
 /* ---------------- init ---------------- */
+const countNode = document.getElementById('labItemCount');
+const breakdownNode = document.getElementById('labItemBreakdown');
+if (countNode) countNode.textContent = `${LAB_ITEM_COUNT} 道`;
+if (breakdownNode) breakdownNode.textContent = `${LAB_PRESETS.length} 主题 + ${LAB_PRESETS.length} 同类`;
 renderPresetList();
 const restored = restoreState();
 if (restored) render(); else { state.screen = 'pick'; render(); }
 updateLabModeBadge();
-setTimeout(updateLabModeBadge, 1500);
+onCapabilities(() => { updateLabModeBadge(); if (state.screen === 'custom' || state.screen === 'answer') render(); });
 
 let savedPanel = 'lab';
 try { const p = localStorage.getItem('cet.reading.panel'); if (p === 'tool') savedPanel = 'tool'; } catch { /* ignore */ }

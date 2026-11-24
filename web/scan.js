@@ -6,6 +6,7 @@
 // keys a session-local result cache, so re-opening the same photo does not
 // spend credits again. The server repeats the dedupe for cross-tab requests.
 import { consumeSSE } from './sse.mjs';
+import { aiErrorMessage, requireFeature } from './shell.js';
 
 const MAX_RAW_BYTES = 20 * 1024 * 1024;
 const MAX_EDGE = 2000;
@@ -149,6 +150,7 @@ export async function transcribePhoto(file, {
   target, level, structured = false, rotate = 0, bypassCache = false,
   signal, onStatus, onPreview,
 } = {}) {
+  await requireFeature('scan');
   onStatus?.('loading', '正在压缩照片…');
   const prepared = await preparePhoto(file, { rotate });
   onPreview?.(prepared.dataUrl);
@@ -174,7 +176,7 @@ export async function transcribePhoto(file, {
     let msg = '识别请求失败。';
     let code = '';
     try { const j = await res.json(); if (j?.message) msg = j.message; if (j?.error) code = j.error; } catch { /* ignore */ }
-    const error = new Error(msg);
+    const error = new Error(aiErrorMessage({ code }, msg));
     error.code = code;
     throw error;
   }
@@ -185,8 +187,9 @@ export async function transcribePhoto(file, {
     if (env.type === 'result') { result = env; return false; }
     if (env.type === 'done') return true;
     if (env.type === 'error') {
-      const error = new Error(env.message || '识别失败，请重拍。');
-      error.code = env.code || '';
+      const code = env.code || '';
+      const error = new Error(aiErrorMessage({ code }, env.message || '暂不可用，请重试。'));
+      error.code = code;
       throw error;
     }
     return false;
@@ -259,11 +262,12 @@ export function imageFileFromDataTransfer(dataTransfer) {
  * Wire drag/drop and paste on a container. Returns a cleanup function.
  * @param {HTMLElement} element
  * @param {(file: File) => void} onFile
- * @param {{ onError?: (message: string) => void }} [options]
+ * @param {{ onError?: (message: string) => void, enabled?: () => boolean }} [options]
  */
-export function wirePhotoDropPaste(element, onFile, { onError } = {}) {
+export function wirePhotoDropPaste(element, onFile, { onError, enabled = () => true } = {}) {
   if (!element) return () => {};
   const handle = dataTransfer => {
+    if (!enabled()) return false;
     const file = imageFileFromDataTransfer(dataTransfer);
     if (!file) return false;
     const err = photoFileError(file);
@@ -272,15 +276,19 @@ export function wirePhotoDropPaste(element, onFile, { onError } = {}) {
     return true;
   };
   const onDragOver = event => {
-    if (!event.dataTransfer) return;
+    if (!event.dataTransfer || !enabled()) return;
     event.preventDefault();
   };
   const onDrop = event => {
     if (!event.dataTransfer) return;
-    if (handle(event.dataTransfer)) event.preventDefault();
+    const hasImage = Boolean(imageFileFromDataTransfer(event.dataTransfer));
+    const handled = handle(event.dataTransfer);
+    if (hasImage || handled) event.preventDefault();
   };
   const onPaste = event => {
-    if (handle(event.clipboardData)) event.preventDefault();
+    const hasImage = Boolean(imageFileFromDataTransfer(event.clipboardData));
+    const handled = handle(event.clipboardData);
+    if (hasImage || handled) event.preventDefault();
   };
   element.addEventListener('dragover', onDragOver);
   element.addEventListener('drop', onDrop);

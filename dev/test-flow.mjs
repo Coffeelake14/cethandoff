@@ -3,7 +3,7 @@
 import { consumeSSE } from '../web/sse.mjs';
 import { computeEstimate } from '../web/engine.js';
 
-const BASE = 'http://127.0.0.1:4318';
+const BASE = process.env.CET_TEST_BASE || 'http://127.0.0.1:4318';
 const app = `${BASE}/functions/v1/app`;
 
 let ipSeq = 0;
@@ -30,7 +30,7 @@ const check = (name, cond) => { results.push({ name, ok: !!cond }); console.log(
 
 const health = await fetch(`${app}?action=health`).then(r => r.json());
 console.log('health:', JSON.stringify(health));
-check('health ok', health.ok && health.service === 'cet-studyhack-lab');
+check('health ok', health.ok === true && !('mode' in health) && !('service' in health));
 
 // photo transcription (Base64 image content block)
 {
@@ -138,8 +138,9 @@ let trainResult = null;
     translation: { mode: 'band', band: 'mid' },
   });
   const frames = await collect(await post('recommend', { level: 'CET4', estimate }));
-  const text = frames.filter(f => f.type === 'delta').map(f => f.text).join('');
-  check('recommend streams grounded text', text.length > 50 && /参考区间/.test(text));
+  const text = frames.filter(f => f.type === 'replace').map(f => f.text).join('');
+  check('recommend returns validated grounded text', text.length > 50 && /参考区间/.test(text));
+  check('recommend cites traceable sources', /资料出处/.test(text) && /\[1\]/.test(text));
   check('recommend has no pass probability', !/通过概率|通过率/.test(text));
 }
 

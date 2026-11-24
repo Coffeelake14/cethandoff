@@ -7,7 +7,7 @@
 import { renderMarkdown } from './markdown.js';
 import { consumeSSE } from './sse.mjs';
 import { SAMPLE_TEXT } from './sample.js';
-import { toast, getServiceMode } from './shell.js';
+import { aiErrorMessage, getCapabilities, isFeatureEnabled, onCapabilities, refreshCapabilities, requireFeature, toast } from './shell.js';
 import { photoFileError, transcribePhoto, confidenceLabel, wirePhotoDropPaste } from './scan.js';
 
 const $ = id => document.getElementById(id);
@@ -20,10 +20,11 @@ const CHUNK_SIZE = 1100;
 let level = localStorage.getItem('cet.tool.level') === 'CET6' ? 'CET6' : 'CET4';
 let vocabData = null;
 
-const trans = { chunks: [], results: [], live: '', busy: false };
+const trans = { chunks: [], results: [], incomplete: [], live: '', busy: false };
 const vocab = { raw: '', busy: false };
 const grammar = { raw: '', busy: false };
 const scan = { busy: false, lastFile: null, controller: null, rotate: 0 };
+const sectionStates = { translation: 'idle', vocab: 'idle', grammar: 'idle' };
 
 /* ---------------- helpers ---------------- */
 function updateCount() {
@@ -48,15 +49,21 @@ function getText() {
 }
 
 function updateModeBadges() {
-  const mode = getServiceMode();
+  const enabled = isFeatureEnabled('explain');
   const el = $('toolModeBadge');
-  if (!el) return;
-  el.dataset.mode = mode;
-  el.textContent = mode === 'live'
-    ? '真实 AI · Qoder Cloud Agents'
-    : mode === 'down'
-      ? '服务离线 · 请稍后重试'
-      : '本地示例模式（假 AI，仅验证流程）';
+  el.dataset.mode = enabled ? 'live' : 'down';
+  el.textContent = enabled ? 'AI 解析可用' : 'AI 解析暂不可用';
+}
+
+function updateScanAvailability() {
+  const enabled = isFeatureEnabled('scan');
+  $('toolScanBox').querySelector('.scan-entry').hidden = !enabled;
+  $('toolScanUnavailable').hidden = enabled;
+  $('toolScanCapabilityRetry').hidden = enabled || getCapabilities().status !== 'unknown';
+}
+
+function unavailableMessage(error) {
+  return aiErrorMessage(error);
 }
 
 function showSection(key) {
@@ -64,10 +71,11 @@ function showSection(key) {
 }
 
 function setSectionStatus(key, state, text) {
+  sectionStates[key] = state;
   const el = $(`tool-status-${key}`);
   el.dataset.state = state;
   el.textContent = text || '';
-  $(`tool-retry-${key}`).hidden = state !== 'error';
+  $(`tool-retry-${key}`).hidden = !['error', 'partial', 'cancelled'].includes(state);
 }
 
 function setBusy(key, busy) {
@@ -106,7 +114,7 @@ function clearScanPhoto() {
 }
 
 async function runReadingScan(file, { bypassCache = false } = {}) {
-  if (scan.busy) return;
+  if (scan.busy || !isFeatureEnabled('scan')) return;
   scan.lastFile = file;
   if (getText() && !window.confirm('识别结果会替换当前原文，已生成的翻译/生词结果会清空。继续吗？')) return;
   scan.busy = true;
@@ -141,7 +149,7 @@ async function runReadingScan(file, { bypassCache = false } = {}) {
     input.scrollIntoView({ behavior: 'smooth', block: 'center' });
     const note = notes ? `（${notes}）` : '';
     const ms = Number(res.meta?.durationMs);
-    const credits = Number(res.usage?.totalCredits);
+    const credits = res.usage?.totalCredits;
     const usage = res.cached ? '复用已有识别结果'
       : [Number.isFinite(ms) && ms > 0 ? `${(ms / 1000).toFixed(1)}s` : '', Number.isFinite(credits) ? `${credits} credits` : ''].filter(Boolean).join(' · ');
     setScanStatus(confidence === 'low' ? 'warn' : 'done',
@@ -149,7 +157,7 @@ async function runReadingScan(file, { bypassCache = false } = {}) {
     toast('已导入原文，可先修改再解析');
   } catch (err) {
     if (scan.controller?.signal.aborted) setScanStatus('error', '识别超时或已取消，可重试或重新拍照。');
-    else setScanStatus('error', err.message || '识别失败，请重拍。');
+    else setScanStatus('error', unavailableMessage(err));
     $('toolScanRetry').hidden = !scan.lastFile;
   } finally {
     clearTimeout(timer);
@@ -187,6 +195,7 @@ function splitChunks(text) {
 
 /* ---------------- transport ---------------- */
 async function streamExplain(section, text, part, total, handlers = {}) {
+  await requireFeature('explain');
   const res = await fetch('/functions/v1/app?action=explain', {
     method: 'POST',
     credentials: 'same-origin',
@@ -194,33 +203,53 @@ async function streamExplain(section, text, part, total, handlers = {}) {
     body: JSON.stringify({ section, text, level, part, total }),
   });
   if (!res.ok) {
-    let msg = '请求失败，请稍后重试。';
-    try { const j = await res.json(); if (j && j.message) msg = j.message; } catch { /* ignore */ }
-    throw new Error(msg);
+    let msg = '暂不可用，请重试。';
+    let code = '';
+    try { const j = await res.json(); if (j?.message) msg = j.message; if (j?.error) code = j.error; } catch {}
+    const error = new Error(aiErrorMessage({ code }, msg));
+    error.code = code;
+    throw error;
   }
   let out = '';
-  await consumeSSE(res, frame => {
-    let env;
-    try { env = JSON.parse(frame.data); } catch { return false; }
-    if (env.type === 'status') { if (env.message) setSectionStatus(section, 'loading', env.message); return false; }
-    if (env.type === 'delta') { out += env.text; handlers.onDelta?.(env.text); return false; }
-    if (env.type === 'replace') { out = env.text; handlers.onReplace?.(env.text); return false; }
-    if (env.type === 'done') return true;
-    if (env.type === 'error') throw new Error(env.message || '生成失败，请重试。');
-    return false;
-  });
-  return out;
+  let complete = false;
+  let state = 'done';
+  try {
+    await consumeSSE(res, frame => {
+      let env;
+      try { env = JSON.parse(frame.data); } catch { return false; }
+      if (env.type === 'status') { if (env.message) setSectionStatus(section, 'loading', env.message); return false; }
+      if (env.type === 'delta') { out += env.text; handlers.onDelta?.(env.text); return false; }
+      if (env.type === 'replace') { out = env.text; handlers.onReplace?.(env.text); return false; }
+      if (env.type === 'done') { complete = true; state = env.state === 'partial' ? 'partial' : 'done'; return true; }
+      if (env.type === 'error') {
+        const error = new Error(aiErrorMessage({ code: env.code }, env.message));
+        error.code = env.code || '';
+        throw error;
+      }
+      return false;
+    });
+  } catch (error) {
+    if (error?.code === 'sse_incomplete') error.code = 'sse_incomplete';
+    throw error;
+  }
+  if (!out.trim()) throw new Error('AI 未返回有效内容，请重试。');
+  return { text: out, state: complete ? state : 'partial' };
 }
 
 /* ---------------- translation ---------------- */
 function paintTranslation() {
   const parts = trans.results.map((r, i) => r || (i === trans.results.findIndex(v => !v) ? trans.live : '')).filter(Boolean);
   const body = $('tool-body-translation');
-  body.innerHTML = parts.length ? renderMarkdown(parts.join('\n\n')) : '<p class="muted">加载中…</p>';
+  body.innerHTML = parts.length
+    ? renderMarkdown(parts.join('\n\n'))
+    : sectionStates.translation === 'loading'
+      ? '<p class="muted">加载中…</p>'
+      : sectionStates.translation === 'idle' ? '' : '<p class="muted">暂不可用，请重试。</p>';
 }
 
 async function runTranslation(start) {
   if (trans.busy) return;
+  if (!trans.chunks.length) return;
   setBusy('trans', true);
   showSection('translation');
   for (let i = start; i < trans.chunks.length; i++) {
@@ -228,17 +257,29 @@ async function runTranslation(start) {
     setSectionStatus('translation', 'loading', `正在翻译第 ${i + 1}/${trans.chunks.length} 段…`);
     paintTranslation();
     try {
-      const out = await streamExplain('translation', trans.chunks[i], i + 1, trans.chunks.length, {
+      const result = await streamExplain('translation', trans.chunks[i], i + 1, trans.chunks.length, {
         onDelta: chunk => { trans.live += chunk; paintTranslation(); },
         onReplace: chunk => { trans.live = chunk; paintTranslation(); },
       });
-      if (!out.trim()) throw new Error('AI 未返回译文');
-      trans.results[i] = out.trim();
+      trans.results[i] = result.text.trim();
+      trans.incomplete[i] = result.state === 'partial';
       trans.live = '';
+      if (trans.incomplete[i]) {
+        setBusy('trans', false);
+        setSectionStatus('translation', 'partial', `第 ${i + 1}/${trans.chunks.length} 段未完整生成，已保留现有内容，可重试失败段。`);
+        paintTranslation();
+        return;
+      }
     } catch (err) {
+      const hasPartial = Boolean(trans.live.trim() || trans.incomplete[i] || trans.results[i]?.trim());
+      if (trans.live.trim()) {
+        trans.results[i] = trans.live.trim();
+        trans.incomplete[i] = true;
+      }
+      trans.live = '';
       setBusy('trans', false);
+      setSectionStatus('translation', hasPartial ? 'partial' : 'error', `第 ${i + 1}/${trans.chunks.length} 段${hasPartial ? '未完整生成' : '失败'}：${unavailableMessage(err)} ${hasPartial ? '已保留生成内容。' : i > 0 ? '已保留已完成段落。' : ''}可重试失败段。`);
       paintTranslation();
-      setSectionStatus('translation', 'error', `第 ${i + 1}/${trans.chunks.length} 段失败：${err.message} 已加载的段已保留，可只重试失败段。`);
       return;
     }
   }
@@ -255,6 +296,7 @@ async function loadTranslation() {
   updateModeBadges();
   trans.chunks = splitChunks(text);
   trans.results = new Array(trans.chunks.length).fill('');
+  trans.incomplete = new Array(trans.chunks.length).fill(false);
   trans.live = '';
   $('tool-body-translation').innerHTML = '';
   await runTranslation(0);
@@ -298,7 +340,11 @@ function vocabFromTable(text) {
 function paintVocab() {
   const body = $('tool-body-vocab');
   const visible = stripVocab(vocab.raw);
-  body.innerHTML = visible.trim() ? renderMarkdown(visible) : '<p class="muted">加载中…</p>';
+  body.innerHTML = visible.trim()
+    ? renderMarkdown(visible)
+    : sectionStates.vocab === 'loading'
+      ? '<p class="muted">加载中…</p>'
+      : sectionStates.vocab === 'idle' ? '' : '<p class="muted">暂不可用，请重试。</p>';
 }
 
 async function loadVocab() {
@@ -315,18 +361,19 @@ async function loadVocab() {
   paintVocab();
   setSectionStatus('vocab', 'loading', '正在提取重点生词…');
   try {
-    const out = await streamExplain('vocab', text, 1, 1, {
+    const result = await streamExplain('vocab', text, 1, 1, {
       onDelta: chunk => { vocab.raw += chunk; paintVocab(); },
       onReplace: chunk => { vocab.raw = chunk; paintVocab(); },
     });
-    vocab.raw = out;
-    vocabData = extractVocab(vocab.raw) || vocabFromTable(vocab.raw);
+    vocab.raw = result.text;
+    vocabData = result.state === 'done' ? extractVocab(vocab.raw) || vocabFromTable(vocab.raw) : null;
     paintVocab();
     $('toolExportBtn').disabled = !vocabData;
-    setSectionStatus('vocab', 'done', vocabData ? `已提取 ${vocabData.length} 个生词，可导出默写清单。` : '已返回生词表，但未识别到可导出的结构。');
+    if (result.state === 'partial') setSectionStatus('vocab', 'partial', '生词结果未完整生成，已保留现有内容，可重试。');
+    else setSectionStatus('vocab', 'done', vocabData ? `已提取 ${vocabData.length} 个生词，可导出默写清单。` : '已返回生词表，但未识别到可导出的结构。');
   } catch (err) {
+    setSectionStatus('vocab', vocab.raw.trim() ? 'partial' : 'error', `${vocab.raw.trim() ? '生词结果未完整生成' : '暂不可用'}：${unavailableMessage(err)} 可重试。`);
     paintVocab();
-    setSectionStatus('vocab', 'error', `${err.message} 可重试本段。`);
   } finally {
     setBusy('vocab', false);
   }
@@ -335,7 +382,11 @@ async function loadVocab() {
 /* ---------------- grammar ---------------- */
 function paintGrammar() {
   const body = $('tool-body-grammar');
-  body.innerHTML = grammar.raw.trim() ? renderMarkdown(grammar.raw) : '<p class="muted">加载中…</p>';
+  body.innerHTML = grammar.raw.trim()
+    ? renderMarkdown(grammar.raw)
+    : sectionStates.grammar === 'loading'
+      ? '<p class="muted">加载中…</p>'
+      : sectionStates.grammar === 'idle' ? '' : '<p class="muted">暂不可用，请重试。</p>';
 }
 
 async function loadGrammar() {
@@ -350,16 +401,17 @@ async function loadGrammar() {
   paintGrammar();
   setSectionStatus('grammar', 'loading', '正在拆解长难句…');
   try {
-    const out = await streamExplain('grammar', text, 1, 1, {
+    const result = await streamExplain('grammar', text, 1, 1, {
       onDelta: chunk => { grammar.raw += chunk; paintGrammar(); },
       onReplace: chunk => { grammar.raw = chunk; paintGrammar(); },
     });
-    grammar.raw = out;
+    grammar.raw = result.text;
     paintGrammar();
-    setSectionStatus('grammar', 'done', '长难句拆解完成。');
+    if (result.state === 'partial') setSectionStatus('grammar', 'partial', '长难句拆解未完整生成，已保留现有内容，可重试。');
+    else setSectionStatus('grammar', 'done', '长难句拆解完成。');
   } catch (err) {
+    setSectionStatus('grammar', grammar.raw.trim() ? 'partial' : 'error', `${grammar.raw.trim() ? '拆解未完整生成' : '暂不可用'}：${unavailableMessage(err)} 可重试。`);
     paintGrammar();
-    setSectionStatus('grammar', 'error', `${err.message} 可重试。`);
   } finally {
     setBusy('grammar', false);
   }
@@ -438,7 +490,7 @@ async function copyAll() {
 }
 
 function resetResults() {
-  trans.chunks = []; trans.results = []; trans.live = '';
+  trans.chunks = []; trans.results = []; trans.incomplete = []; trans.live = '';
   vocab.raw = ''; grammar.raw = '';
   vocabData = null;
   for (const key of ['translation', 'vocab', 'grammar']) {
@@ -456,7 +508,7 @@ function loadSample() {
   input.value = SAMPLE_TEXT;
   updateCount();
   saveDraft();
-  toast('已加载示例文章，点一个按钮按需解析');
+  toast('已载入原创文章');
   input.focus();
 }
 
@@ -474,7 +526,8 @@ $('toolClearBtn').addEventListener('click', () => {
   if (!scan.busy) clearScanPhoto();
   input.focus();
 });
-$('toolScanBtn').addEventListener('click', () => $('toolScanFile').click());
+$('toolScanBtn').addEventListener('click', () => { if (isFeatureEnabled('scan')) $('toolScanFile').click(); });
+$('toolScanCapabilityRetry').addEventListener('click', () => { void refreshCapabilities(); });
 $('toolScanFile').addEventListener('change', e => {
   const file = e.target.files?.[0];
   e.target.value = '';
@@ -497,12 +550,12 @@ wirePhotoDropPaste($('toolScanBox') || input, file => {
   if (err) { toast(err, 'err'); return; }
   scan.rotate = 0;
   runReadingScan(file);
-}, { onError: msg => toast(msg, 'err') });
+}, { onError: msg => toast(msg, 'err'), enabled: () => isFeatureEnabled('scan') });
 $('toolTransBtn').addEventListener('click', loadTranslation);
 $('toolVocabBtn').addEventListener('click', loadVocab);
 $('toolGrammarBtn').addEventListener('click', loadGrammar);
 $('tool-retry-translation').addEventListener('click', () => {
-  const i = trans.results.findIndex(r => !r);
+  const i = trans.results.findIndex((r, idx) => !r || trans.incomplete[idx]);
   runTranslation(i < 0 ? 0 : i);
 });
 $('tool-retry-vocab').addEventListener('click', loadVocab);
@@ -517,4 +570,5 @@ const draft = localStorage.getItem('cet.tool.draft');
 if (draft) input.value = draft;
 updateCount();
 updateModeBadges();
-setTimeout(updateModeBadges, 1500);
+updateScanAvailability();
+onCapabilities(() => { updateModeBadges(); updateScanAvailability(); });

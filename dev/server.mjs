@@ -1,22 +1,29 @@
-// DEV ONLY — local preview runner for the CET StudyHack reading lab + reference
-// estimator. Serves web/ and routes /functions/v1/app to the REAL application
-// handler (functions/handler.mjs) with a credential-free fake Cloud upstream
-// that answers train / explain / grade / recommend / scan (transfer comes from
-// the real vetted bank). Exercises actual routing, validation, SSE projection and
-// prompt building; only the QCA transport is simulated. Never deployed: the
-// production Function uses the real cloud-agents client.
+// Local manual runs serve real learning materials and close cloud-dependent
+// actions without a deployment. Only automated tests opt into fixture output.
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppHandler } from '../functions/handler.mjs';
-import { __resetResourceCache } from '../functions/resources.mjs';
-import { createFakeCloud } from './fake-cloud.mjs';
+import { AI_ACTIONS } from '../functions/gate.mjs';
 
-const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'web');
+const ROOT = fileURLToPath(new URL('../web', import.meta.url));
 const PORT = Number(process.env.PORT || 4318);
-
-const handler = createAppHandler({ cloud: createFakeCloud(), mode: 'local-fixture' });
+const fixtures = process.argv.includes('--test-fixtures');
+const fixtureFeatures = Object.fromEntries(AI_ACTIONS.map(action => [action, true]));
+const options = {};
+if (fixtures) {
+  const { createFakeCloud } = await import('./fake-cloud.mjs');
+  process.env.CET_SCAN_MODEL = 'fixture-model';
+  options.cloud = createFakeCloud();
+  options.gate = {
+    features: fixtureFeatures,
+    requiresVisitor: false,
+    authorize: async () => ({ ok: true }),
+    admit: async () => ({ ok: true, async settle() {} }),
+  };
+}
+const handler = createAppHandler(options);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -56,15 +63,13 @@ const server = http.createServer(async (req, res) => {
     const pathname = decodeURIComponent(new URL(req.url, `http://127.0.0.1:${PORT}`).pathname);
     if (pathname.startsWith('/functions/v1/app')) {
       const controller = new AbortController();
-      req.on('close', () => controller.abort());
+      res.once('close', () => { if (!res.writableEnded) controller.abort(); });
       const response = await handler(await toWebRequest(req, controller.signal));
       await sendWebResponse(res, response);
       return;
     }
-    let rel = normalize(pathname).replace(/^([/\\])+/, '');
-    if (rel === '' || rel === '.') rel = 'index.html';
-    const filePath = join(ROOT, rel);
-    if (!filePath.startsWith(ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
+    const filePath = resolve(ROOT, '.' + (pathname === '/' ? '/index.html' : pathname));
+    if (!filePath.startsWith(ROOT + sep)) { res.writeHead(403); res.end('Forbidden'); return; }
     const data = await readFile(filePath);
     res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
@@ -75,6 +80,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  __resetResourceCache();
-  console.log(`CET StudyHack lab local preview: http://127.0.0.1:${PORT}/`);
+  const address = server.address();
+  console.log(`StudyHack ${fixtures ? 'automated fixtures' : 'local'}: http://127.0.0.1:${address.port}/`);
 });
