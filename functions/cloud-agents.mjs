@@ -48,7 +48,9 @@ export function createCloudAgentsClient({
     if (typeof token !== 'string' || !token.trim() || /[\r\n]/.test(token)) throw fail('ai_not_configured', 503, 'not_sent');
     let encoded;
     try { encoded = body === undefined ? undefined : JSON.stringify(body); } catch { throw fail('ai_request_invalid', 400, 'not_sent'); }
-    if (encoded && new TextEncoder().encode(encoded).length > 1024 * 1024) throw fail('ai_request_too_large', 413, 'not_sent');
+    // Image blocks are inlined as Base64 (Cloud Agents allows up to 10 MiB per
+    // image); leave a margin for the surrounding event JSON.
+    if (encoded && new TextEncoder().encode(encoded).length > 11 * 1024 * 1024) throw fail('ai_request_too_large', 413, 'not_sent');
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' };
     if (encoded !== undefined) headers['Content-Type'] = 'application/json';
     if (idempotencyKey !== undefined) {

@@ -23,18 +23,42 @@ async function digest(value) {
   return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function pickModel(models) {
+// The /api/v1/cloud/models response documented by Qoder CN does not expose a
+// vision/modality field. When a deployment later adds one, honor it; otherwise
+// report that vision capability is undeclared instead of claiming it.
+function declaredVision(m) {
+  if (!m || typeof m !== 'object') return false;
+  if (m.supports_vision === true || m.vision === true || m.multimodal === true) return true;
+  for (const key of ['capabilities', 'input_modalities', 'modalities', 'inputs']) {
+    const value = m[key];
+    if (Array.isArray(value) && value.some(v => typeof v === 'string' && /^(image|vision|multimodal)$/i.test(v))) return true;
+    if (typeof value === 'string' && /(^|[,\s])(image|vision|multimodal)([,\s]|$)/i.test(value)) return true;
+  }
+  return false;
+}
+
+function pickModel(models, { vision = false, override = '' } = {}) {
   const list = Array.isArray(models?.data) ? models.data : [];
   const usable = list.filter(m => m && typeof m.id === 'string'
-    && (m.enabled === undefined || m.enabled === true || m.status === 'enabled' || m.status === 'active'));
+    && m.enabled !== false && m.is_enabled !== false
+    && (m.status === undefined || m.status === 'enabled' || m.status === 'active'));
   const pool = usable.length ? usable : list.filter(m => m && typeof m.id === 'string');
   if (!pool.length) {
     const err = new Error('ai_not_configured');
     err.code = 'ai_not_configured';
     throw err;
   }
+  if (override && pool.some(m => m.id === override)) {
+    const match = pool.find(m => m.id === override);
+    return { id: override, visionDeclared: declaredVision(match), modelSource: 'env' };
+  }
+  if (vision) {
+    const visual = pool.find(declaredVision);
+    if (visual) return { id: visual.id, visionDeclared: true, modelSource: 'catalog' };
+  }
   const preferred = pool.find(m => /claude|sonnet|qwen-?max|qwen-?plus|gpt-?[45]|gemini.*pro|deepseek/i.test(m.id));
-  return (preferred || pool[0]).id;
+  const chosen = preferred || pool[0];
+  return { id: chosen.id, visionDeclared: declaredVision(chosen), modelSource: 'catalog' };
 }
 
 const cache = new Map();
@@ -83,7 +107,9 @@ export async function ensureResources(cloud, scope, systemPrompt, profile) {
   if (entry.inflight) return entry.inflight;
   entry.inflight = (async () => {
     const models = await cloud.request('/api/v1/cloud/models');
-    const model = pickModel(models);
+    let override = '';
+    try { override = profile.modelEnv ? globalThis.Deno?.env.get(profile.modelEnv) || '' : ''; } catch { /* no env */ }
+    const picked = pickModel(models, { vision: profile.vision === true, override });
     const environment = await ensureOne(cloud, 'environments', {
       name: profile.envName,
       config: { type: 'cloud' },
@@ -91,7 +117,7 @@ export async function ensureResources(cloud, scope, systemPrompt, profile) {
     }, scope);
     const agent = await ensureOne(cloud, 'agents', {
       name: profile.agentName,
-      model,
+      model: picked.id,
       system: systemPrompt,
       tools: [],
       metadata: { ...profile.metadata, purpose: profile.purpose },
@@ -104,7 +130,9 @@ export async function ensureResources(cloud, scope, systemPrompt, profile) {
     const binding = {
       agent: { type: 'agent', id: agent.id, version: agent.version },
       environment_id: environment.id,
-      model,
+      model: picked.id,
+      visionDeclared: picked.visionDeclared,
+      modelSource: picked.modelSource,
     };
     entry.binding = binding;
     return binding;

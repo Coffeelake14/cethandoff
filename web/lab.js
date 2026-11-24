@@ -14,6 +14,7 @@ import { LAB_PRESETS, ERROR_LABELS, findPreset } from './lab-data.js';
 import { escapeHtml } from './markdown.js';
 import { consumeSSE } from './sse.mjs';
 import { toast, getServiceMode } from './shell.js';
+import { photoFileError, transcribePhoto, confidenceLabel, highlightUncertain, wirePhotoDropPaste } from './scan.js';
 
 const $ = id => document.getElementById(id);
 const labStage = $('labStage');
@@ -37,6 +38,13 @@ const state = {
   loadingMsg: '',
   error: '',
   transfer: null,
+};
+
+// Photo import for the custom-material passage. Photos stay in memory; only
+// the recognised text is written into the saved custom form.
+const customScan = {
+  busy: false, lastFile: null, controller: null, tone: '', text: '', preview: '',
+  retry: false, rotate: 0, doc: null, qIndex: 0,
 };
 
 /* ---------------- data shaping ---------------- */
@@ -647,6 +655,178 @@ function summaryHtml() {
     </div>`;
 }
 
+function customScanStatusHtml() {
+  const tone = customScan.tone ? ` data-state="${customScan.tone}"` : '';
+  const hidden = customScan.text ? '' : ' hidden';
+  return `<div class="tool-status scan-status" id="lab-scan-status" role="status" aria-live="polite"${tone}${hidden}>${escapeHtml(customScan.text)}</div>`;
+}
+
+function customScanPreviewHtml() {
+  if (!customScan.preview || customScan.doc) return '';
+  return `<div class="scan-preview compact" id="lab-scan-preview">
+      <img id="lab-scan-img" src="${customScan.preview}" alt="待识别的原文照片预览" />
+      <span>照片仅用于本次识别，不会存入浏览器草稿或本站数据库。</span>
+    </div>`;
+}
+
+function customScanReviewHtml() {
+  if (!customScan.preview) return '';
+  const doc = customScan.doc || {};
+  const transcript = String(doc.passage || doc.text || '').trim();
+  const uncertain = Array.isArray(doc.uncertain) ? doc.uncertain : [];
+  return `<div class="scan-review" id="lab-scan-review">
+      <div class="scan-review-img"><img id="lab-scan-img" src="${customScan.preview}" alt="识别原文照片" /></div>
+      <div class="scan-review-text">
+        ${transcript
+          ? `<div class="scan-review-block"><h4>识别到的原文（保留原始换行）</h4><div>${highlightUncertain(transcript, uncertain)}</div></div>`
+          : '<p class="muted">正在识别文字…</p>'}
+        <p class="scan-review-note">照片不会存入浏览器草稿；黄色标记为识别不确定处。请在原文框校对后再切句。</p>
+      </div>
+    </div>`;
+}
+
+function customQuestionsHtml() {
+  const questions = customScan.doc?.questions || [];
+  if (!questions.length) return '';
+  return `<div class="scan-question-list">
+      <span class="cf-label">识别到 ${questions.length} 道题，点选导入：</span>
+      <div class="scan-q-actions">
+        ${questions.map((q, i) => `<button type="button" class="scan-q-btn${i === customScan.qIndex ? ' active' : ''}" data-act="custom-q" data-idx="${i}">第 ${i + 1} 题${q.no ? `（${escapeHtml(q.no)}）` : ''}</button>`).join('')}
+      </div>
+      <p class="scan-review-note">导入后仍可在下方修改题干、选项与参考答案。</p>
+    </div>`;
+}
+
+function customScanUsage(res) {
+  if (!res || res.cached) return res?.cached ? '已复用同一张照片的识别结果' : '';
+  const bits = [];
+  const ms = Number(res.meta?.durationMs);
+  if (Number.isFinite(ms) && ms > 0) bits.push(`${(ms / 1000).toFixed(1)}s`);
+  const credits = Number(res.usage?.totalCredits);
+  if (Number.isFinite(credits)) bits.push(`${credits} credits`);
+  return bits.join(' · ');
+}
+
+function applyImportedQuestion(idx, { renderNow = true } = {}) {
+  const questions = customScan.doc?.questions || [];
+  const q = questions[idx];
+  if (!q) return false;
+  const form = state.customForm || blankCustomForm();
+  form.stem = q.stem;
+  form.answer = '';
+  form.options = { A: '', B: '', C: '', D: '' };
+  for (const opt of q.options) form.options[opt.key] = opt.text;
+  customScan.qIndex = idx;
+  saveState();
+  if (renderNow) render();
+  return true;
+}
+
+function paintCustomScan() {
+  const st = $('lab-scan-status');
+  if (!st) return;
+  st.hidden = !customScan.text;
+  if (customScan.tone) st.dataset.state = customScan.tone;
+  else delete st.dataset.state;
+  st.textContent = customScan.text;
+  const preview = $('lab-scan-preview');
+  if (customScan.preview && !customScan.doc) {
+    if (preview) {
+      const img = $('lab-scan-img');
+      if (img) img.src = customScan.preview;
+      preview.hidden = false;
+    } else {
+      $('lab-scan-file')?.closest('.scan-inline')?.insertAdjacentHTML('beforeend', customScanPreviewHtml());
+    }
+  } else if (preview) {
+    preview.remove();
+  }
+  const retry = labStage.querySelector('[data-act="custom-scan-retry"]');
+  if (retry) retry.hidden = !customScan.retry;
+  const clear = labStage.querySelector('[data-act="custom-scan-clear"]');
+  if (clear) clear.hidden = !customScan.preview;
+  const rotate = labStage.querySelector('[data-act="custom-scan-rotate"]');
+  if (rotate) rotate.hidden = !customScan.preview;
+  labStage.querySelectorAll('[data-act="custom-scan"], [data-act="custom-scan-rotate"], [data-act="custom-scan-retry"], [data-act="custom-scan-clear"]')
+    .forEach(b => { b.disabled = customScan.busy; });
+}
+
+function setCustomScanStatus(tone, text, retry) {
+  customScan.tone = tone || '';
+  customScan.text = text || '';
+  if (retry !== undefined) customScan.retry = retry;
+  paintCustomScan();
+}
+
+function resetCustomScan() {
+  customScan.busy = false;
+  customScan.lastFile = null;
+  customScan.controller = null;
+  customScan.tone = '';
+  customScan.text = '';
+  customScan.preview = '';
+  customScan.retry = false;
+  customScan.rotate = 0;
+  customScan.doc = null;
+  customScan.qIndex = 0;
+}
+
+async function runCustomScan(file, { bypassCache = false } = {}) {
+  if (customScan.busy) return;
+  customScan.lastFile = file;
+  const form = state.customForm || blankCustomForm();
+  if (String(form.text || '').trim() && !window.confirm('识别结果会替换当前原文与题目，继续吗？')) return;
+  customScan.busy = true;
+  customScan.retry = false;
+  customScan.controller = new AbortController();
+  const timer = setTimeout(() => customScan.controller.abort(), 90000);
+  paintCustomScan();
+  setCustomScanStatus('loading', '正在压缩照片…');
+  try {
+    const res = await transcribePhoto(file, {
+      target: 'reading',
+      level: form.level === 'CET6' ? 'CET6' : 'CET4',
+      structured: true,
+      rotate: customScan.rotate,
+      bypassCache,
+      signal: customScan.controller.signal,
+      onStatus: (tone, msg) => setCustomScanStatus(tone, msg),
+      onPreview: dataUrl => { customScan.preview = dataUrl; paintCustomScan(); },
+    });
+    const doc = res.doc || {};
+    const passage = String(doc.passage || '').trim() || res.text;
+    if (passage.length > 12000) throw new Error(`识别到 ${passage.length} 字符，超过 12000 上限，请只拍一页或分段导入。`);
+    state.customForm.text = passage;
+    customScan.doc = doc;
+    customScan.qIndex = 0;
+    const questions = Array.isArray(doc.questions) ? doc.questions : [];
+    if (questions.length) applyImportedQuestion(0, { renderNow: false });
+    saveState();
+    const parts = [];
+    if (questions.length) parts.push(`已识别并导入 ${questions.length} 道题中的第 1 题`);
+    else parts.push('未识别到完整 A/B/C/D 题目，请手动填写题干与选项');
+    if (doc.uncertain?.length) parts.push(`${doc.uncertain.length} 处文字不确定，已高亮`);
+    const note = res.notes ? `（${res.notes}）` : '';
+    const usage = customScanUsage(res);
+    if (usage) parts.push(usage);
+    const warn = res.confidence === 'low' || !questions.length;
+    customScan.tone = warn ? 'warn' : 'done';
+    customScan.text = `识别完成，可信度${confidenceLabel(res.confidence)}${note}。${parts.join('；')}。`;
+    customScan.retry = false;
+    render();
+    $('lab-custom-text')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast('已导入原文，可先校对');
+  } catch (err) {
+    if (customScan.controller?.signal.aborted) setCustomScanStatus('error', '识别超时或已取消，可重试或重新拍照。', !!customScan.lastFile);
+    else setCustomScanStatus('error', err.message || '识别失败，请重拍。', !!customScan.lastFile);
+  } finally {
+    clearTimeout(timer);
+    customScan.busy = false;
+    customScan.controller = null;
+    paintCustomScan();
+  }
+}
+
 function customHtml() {
   const f = state.customForm || blankCustomForm();
   return `
@@ -663,7 +843,21 @@ function customHtml() {
           </div>
         </div>
         <label class="cf-label" for="lab-custom-text">阅读原文 <span class="muted">（按句号等自动切句，最多 60 句）</span></label>
-        <textarea id="lab-custom-text" data-field="text" maxlength="12000" placeholder="粘贴英文原文……">${escapeHtml(f.text)}</textarea>
+        <div class="scan-inline">
+          <div class="scan-inline-row">
+            <button type="button" class="btn btn-sm" data-act="custom-scan"${customScan.busy ? ' disabled' : ''}><svg><use href="#i-camera"/></svg>拍照导入原文与题目</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-rotate"${customScan.preview ? '' : ' hidden'}>旋转 90°</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-retry"${customScan.retry ? '' : ' hidden'}>重试识别</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-act="custom-scan-clear"${customScan.preview ? '' : ' hidden'}>移除照片</button>
+            <span class="scan-inline-hint">拍照、相册、拖拽或 Ctrl+V 粘贴；识别后可校对</span>
+          </div>
+          <input type="file" id="lab-scan-file" accept="image/jpeg,image/png,image/webp" hidden />
+          ${customScanStatusHtml()}
+          ${customScanPreviewHtml()}
+          ${customScanReviewHtml()}
+        </div>
+        <textarea id="lab-custom-text" data-field="text" maxlength="12000" placeholder="粘贴英文原文，或拍照导入……">${escapeHtml(f.text)}</textarea>
+        ${customQuestionsHtml()}
         <label class="cf-label" for="lab-custom-stem">题干</label>
         <input id="lab-custom-stem" data-field="stem" maxlength="500" value="${escapeHtml(f.stem)}" placeholder="例如：What is the main idea of the passage?" />
         <span class="cf-label">四个选项</span>
@@ -795,6 +989,7 @@ function blankCustomForm() {
 
 function openCustom() {
   if (!state.customForm) state.customForm = blankCustomForm();
+  resetCustomScan();
   state.mode = 'custom';
   state.material = null;
   state.attempt = null;
@@ -1123,6 +1318,23 @@ labStage.addEventListener('click', e => {
   if (act === 'pick') { goPick(); return; }
   if (act === 'start-custom') { startCustom(); return; }
   if (act === 'custom-level') { state.customForm.level = btn.dataset.level === 'CET6' ? 'CET6' : 'CET4'; saveState(); render(); return; }
+  if (act === 'custom-scan') { $('lab-scan-file')?.click(); return; }
+  if (act === 'custom-scan-rotate') {
+    if (customScan.busy || !customScan.lastFile) return;
+    customScan.rotate = (customScan.rotate + 90) % 360;
+    runCustomScan(customScan.lastFile, { bypassCache: true });
+    return;
+  }
+  if (act === 'custom-scan-retry') { if (customScan.lastFile) runCustomScan(customScan.lastFile, { bypassCache: true }); return; }
+  if (act === 'custom-q') { applyImportedQuestion(Number(btn.dataset.idx)); return; }
+  if (act === 'custom-scan-clear') {
+    if (customScan.busy) return;
+    customScan.preview = ''; customScan.tone = ''; customScan.text = ''; customScan.retry = false;
+    customScan.doc = null; customScan.qIndex = 0; customScan.rotate = 0;
+    paintCustomScan();
+    render();
+    return;
+  }
 });
 
 labStage.addEventListener('input', e => {
@@ -1136,6 +1348,25 @@ labStage.addEventListener('input', e => {
   else if (key.startsWith('opt-')) state.customForm.options[key.slice(4)] = field.value;
   scheduleSave();
 });
+
+labStage.addEventListener('change', e => {
+  if (e.target.id !== 'lab-scan-file') return;
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  const err = photoFileError(file);
+  if (err) { toast(err, 'err'); return; }
+  customScan.rotate = 0;
+  runCustomScan(file);
+});
+
+wirePhotoDropPaste(labStage, file => {
+  if (state.screen !== 'custom' || customScan.busy) return;
+  const err = photoFileError(file);
+  if (err) { toast(err, 'err'); return; }
+  customScan.rotate = 0;
+  runCustomScan(file);
+}, { onError: msg => toast(msg, 'err') });
 
 /* ---------------- sub-panel nav ---------------- */
 function showPanel(which, persist = true) {

@@ -106,6 +106,85 @@ export function buildExplainUserPrompt({ section, level, text, part = 1, total =
   ].filter(Boolean).join('\n');
 }
 
+/* ---------------- photo transcription (strict JSON) */
+
+export function buildScanSystemPrompt() {
+  return [
+    '你是四六级答题卡与阅读材料的文字识别助手。用户会发来一张照片。',
+    '你只做文字识别（OCR）：不评分、不翻译、不润色、不补全、不判断对错、不解答题目。',
+    '只输出一个 JSON 对象，不要代码块、不要前言、不要任何 JSON 以外的文字。',
+    'text 必须忠实还原照片中可见的文字，保留原有换行；看不清的词用 [?] 标记，不要凭上下文猜测。',
+    '如果照片里没有可识别的文字，text 输出空字符串。',
+    'confidence 只能取 high、medium、low，表示整体识别可信度。',
+    'notes 用一句简体中文说明拍摄或字迹问题（例如模糊、反光、缺角），最多 50 个汉字；没有问题时输出空字符串。',
+    '输出字段固定为：{"text":"...","confidence":"high|medium|low","notes":"..."}',
+  ].join('\n');
+}
+
+/* ---------------- structured document recognition (reading / essay / translation) */
+
+export function buildStructuredScanSystemPrompt() {
+  return [
+    '你是四六级试卷与手写作答的结构化识别助手。用户会发来一张照片，你只做忠实转写与版面结构提取。',
+    '严禁评分、翻译、纠错、润色、补全、改写、判断对错或给出正确选项。',
+    '只输出一个 JSON 对象，不要代码块、不要前言、不要任何 JSON 以外的文字。',
+    '拼写错误、语法错误、涂改痕迹都必须按原样保留；不要自动修正，也不要在正文中加批注。',
+    '保留原有段落、换行、题号顺序和 A/B/C/D 选项对应关系；双栏排版按“左栏读完再右栏”的语义顺序输出。',
+    '看不清的单词或汉字用 [?] 标记，不要凭上下文猜测；无法确认的连续片段逐字放入 uncertain。',
+    'uncertain 中的每一项必须是 text 中真实出现的连续子串，最多 20 项；没有则输出空数组。',
+    '不适用于当前题型的字段必须输出空字符串或空数组，绝不编造。',
+    'confidence 只能取 high、medium、low；notes 用一句简体中文说明拍摄或字迹问题，最多 60 个汉字。',
+    '输出字段固定为：',
+    '{"kind":"reading|writing|translation|other","text":"...","passage":"...","questions":[{"no":"21","stem":"...","options":[{"key":"A","text":"..."},{"key":"B","text":"..."},{"key":"C","text":"..."},{"key":"D","text":"..."}]}],"prompt_material":"...","student_answer":"...","uncertain":["..."],"confidence":"high|medium|low","notes":"..."}',
+  ].join('\n');
+}
+
+const STRUCTURED_TARGET = {
+  reading: [
+    '任务：识别一页四六级阅读理解材料，包括文章、题号、题干和 A/B/C/D 选项。',
+    'kind 必须是 reading；text 输出整页可见文字；passage 只放英文文章正文；questions 按试卷顺序输出，每题的 options 必须恰好 4 项且 key 为 A/B/C/D。',
+    '不要回答题目，不要补写缺失选项，不要编造题号。prompt_material 与 student_answer 必须为空字符串。',
+    '如果照片里只有文章没有题目，questions 输出空数组。',
+  ].join('\n'),
+  writing: [
+    '任务：识别一页英文作文，照片可能同时包含印刷体作文题目/要求和学生手写作文。',
+    'kind 必须是 writing；prompt_material 只放印刷体的作文题目与要求（没有就留空）；student_answer 只放学生手写作文正文。',
+    'student_answer 必须逐字保留学生的拼写、语法、标点和分段，禁止纠错或改写；text 输出整页可见文字。',
+    'passage 为空字符串，questions 为空数组。',
+  ].join('\n'),
+  translation: [
+    '任务：识别一页翻译作答，照片可能同时包含中文原题和学生手写英文译文。',
+    'kind 必须是 translation；prompt_material 只放中文原题；student_answer 只放学生手写的英文译文。',
+    'student_answer 必须逐字保留学生的拼写、语法、标点和分段，禁止纠错或改写；text 输出整页可见文字。',
+    'passage 为空字符串，questions 为空数组。',
+  ].join('\n'),
+};
+
+export function buildStructuredScanUserPrompt({ target, level }) {
+  const contract = STRUCTURED_TARGET[target] || STRUCTURED_TARGET.reading;
+  const limit = target === 'reading' ? 12000 : 4000;
+  return [
+    '【结构化识别】',
+    `【考试级别】${LEVEL_LABEL(level)}`,
+    contract,
+    `【长度限制】text 与对应正文字段各不超过 ${limit} 个字符；questions 最多 20 题。`,
+    '【输出】只输出约定的 JSON，字段齐全；不要输出 OCR 过程、解释或置信度分析。',
+  ].join('\n');
+}
+
+export function buildScanUserPrompt({ target, level }) {
+  const targetLabel = target === 'translation' ? '翻译译文（通常是手写英文）'
+    : target === 'reading' ? '阅读原文（印刷体或手写英文，可能含题目）'
+    : '作文（通常是手写英文）';
+  return [
+    '【拍照识别】',
+    `【考试级别】${LEVEL_LABEL(level)}`,
+    `【识别对象】${targetLabel}`,
+    '【要求】逐行识别照片中的文字，保留段落与换行；看不清的词写 [?]；不要翻译、改写或答题。',
+    '请只输出约定的 JSON。',
+  ].join('\n');
+}
+
 /* ---------------- score estimator: grading with materials */
 
 export function buildEstimatorSystemPrompt() {
@@ -135,8 +214,16 @@ export function buildGradePrompt({ level, writing, writingPrompt, translation, t
     '- 文本为空或明显无关时，该项 score 与 band 置为 null，comment 写“未提供有效文本”。',
     '- comment 用 1–2 句中文指出主要优点与最需改进之处，不承诺提分。',
     '',
-    '只输出如下 JSON（不要代码块、不要多余文字）：',
-    '{"writing":{"score":数字或null,"band":"low|mid|high|null","relevance":"checked|not_checked","comment":"..."},"translation":{"score":数字或null,"band":"low|mid|high|null","relevance":"checked|not_checked","comment":"..."}}',
+    '逐句批改规则：',
+    '- 每项 errors 最多 12 条；quote 必须逐字摘自对应的学生文本（2–60 字），不得改写或编造；fix 给出最小修改建议，note 用一句中文说明原因。',
+    '- 写作错误类型只能取：spelling, grammar, word_choice, collocation, structure, coherence, punctuation, content。',
+    '- 翻译错误类型只能取：omission, misread, grammar, word_choice, expression, punctuation, content。没有中文原文时不得使用 omission / misread。',
+    '- 没有作文题目时不得输出 content 类错误，也不得判断切题。',
+    '- suggestions 每项 1–3 条、每条不超过 80 个汉字，必须可执行，不承诺提分。',
+    '- 文本为空时 errors 与 suggestions 都输出空数组。',
+    '',
+    '只输出如下 JSON（不要代码块、不要多余文字，不要输出统计字段）：',
+    '{"writing":{"score":数字或null,"band":"low|mid|high|null","relevance":"checked|not_checked","comment":"...","errors":[{"quote":"...","type":"spelling|grammar|word_choice|collocation|structure|coherence|punctuation|content","fix":"...","note":"..."}],"suggestions":["..."]},"translation":{"score":数字或null,"band":"low|mid|high|null","relevance":"checked|not_checked","comment":"...","errors":[{"quote":"...","type":"omission|misread|grammar|word_choice|expression|punctuation|content","fix":"...","note":"..."}],"suggestions":["..."]}}',
     '',
     `【作文题目】\n${wMaterial ? writingPrompt.trim() : '（未提供）'}`,
     `【写作文本】\n${(writing || '').trim() || '（未提供）'}`,

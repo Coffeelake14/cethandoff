@@ -32,6 +32,22 @@ const health = await fetch(`${app}?action=health`).then(r => r.json());
 console.log('health:', JSON.stringify(health));
 check('health ok', health.ok && health.service === 'cet-studyhack-lab');
 
+// photo transcription (Base64 image content block)
+{
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const frames = await collect(await post('scan', { target: 'writing', level: 'CET4', image: `data:image/png;base64,${png}` }));
+  const text = frames.find(f => f.type === 'result')?.text || '';
+  const done = frames.find(f => f.type === 'done');
+  console.log('scan transcript chars:', text.length, 'done:', done?.state);
+  check('scan returns transcript + completes', text.length > 40 && done?.state === 'completed');
+  check('scan has no raw JSON in stream', !frames.some(f => f.type === 'delta'));
+
+  const readingFrames = await collect(await post('scan', { target: 'reading', level: 'CET6', image: `data:image/png;base64,${png}` }));
+  const readingText = readingFrames.find(f => f.type === 'result')?.text || '';
+  const readingDone = readingFrames.find(f => f.type === 'done');
+  check('reading scan returns transcript + completes', readingText.length > 40 && readingDone?.state === 'completed');
+}
+
 const passage = 'Many students now read their course materials on screens rather than on paper. Some of the students who used tablets reported feeling more distracted by notifications. For quick scanning, a screen is clearly more convenient.';
 
 // translation chunk

@@ -8,6 +8,7 @@ import { renderMarkdown } from './markdown.js';
 import { consumeSSE } from './sse.mjs';
 import { SAMPLE_TEXT } from './sample.js';
 import { toast, getServiceMode } from './shell.js';
+import { photoFileError, transcribePhoto, confidenceLabel, wirePhotoDropPaste } from './scan.js';
 
 const $ = id => document.getElementById(id);
 const input = $('toolInput');
@@ -22,6 +23,7 @@ let vocabData = null;
 const trans = { chunks: [], results: [], live: '', busy: false };
 const vocab = { raw: '', busy: false };
 const grammar = { raw: '', busy: false };
+const scan = { busy: false, lastFile: null, controller: null, rotate: 0 };
 
 /* ---------------- helpers ---------------- */
 function updateCount() {
@@ -75,6 +77,86 @@ function setBusy(key, busy) {
   if (key === 'trans') trans.busy = busy;
   if (key === 'vocab') vocab.busy = busy;
   if (key === 'grammar') grammar.busy = busy;
+}
+
+/* ---------------- photo import ---------------- */
+function setScanStatus(tone, text) {
+  const el = $('toolScanStatus');
+  el.hidden = !text;
+  if (tone) el.dataset.state = tone;
+  else delete el.dataset.state;
+  el.textContent = text || '';
+}
+
+function setScanBusy(on) {
+  scan.busy = on;
+  for (const id of ['toolScanBtn', 'toolScanRotate', 'toolScanRetry', 'toolScanClear']) $(id).disabled = on;
+}
+
+function clearScanPhoto() {
+  scan.lastFile = null;
+  scan.rotate = 0;
+  $('toolScanImg').removeAttribute('src');
+  $('toolScanPreview').hidden = true;
+  $('toolScanClear').hidden = true;
+  $('toolScanRotate').hidden = true;
+  $('toolScanRetry').hidden = true;
+  $('toolScanFile').value = '';
+  setScanStatus('', '');
+}
+
+async function runReadingScan(file, { bypassCache = false } = {}) {
+  if (scan.busy) return;
+  scan.lastFile = file;
+  if (getText() && !window.confirm('识别结果会替换当前原文，已生成的翻译/生词结果会清空。继续吗？')) return;
+  scan.busy = true;
+  scan.controller = new AbortController();
+  const timer = setTimeout(() => scan.controller.abort(), 90000);
+  setScanBusy(true);
+  $('toolScanRetry').hidden = true;
+  setScanStatus('loading', '正在压缩照片…');
+  try {
+    const res = await transcribePhoto(file, {
+      target: 'reading',
+      level,
+      rotate: scan.rotate,
+      bypassCache,
+      signal: scan.controller.signal,
+      onStatus: (tone, msg) => setScanStatus(tone, msg),
+      onPreview: dataUrl => {
+        $('toolScanImg').src = dataUrl;
+        $('toolScanPreview').hidden = false;
+        $('toolScanClear').hidden = false;
+        $('toolScanRotate').hidden = false;
+      },
+    });
+    const { text, confidence, notes } = res;
+    if (text.length > MAX_INPUT) {
+      throw new Error(`识别到 ${text.length} 字符，超过 ${MAX_INPUT} 上限，请只拍一页或分段导入。`);
+    }
+    resetResults();
+    input.value = text;
+    updateCount();
+    saveDraft();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const note = notes ? `（${notes}）` : '';
+    const ms = Number(res.meta?.durationMs);
+    const credits = Number(res.usage?.totalCredits);
+    const usage = res.cached ? '复用已有识别结果'
+      : [Number.isFinite(ms) && ms > 0 ? `${(ms / 1000).toFixed(1)}s` : '', Number.isFinite(credits) ? `${credits} credits` : ''].filter(Boolean).join(' · ');
+    setScanStatus(confidence === 'low' ? 'warn' : 'done',
+      `识别完成，可信度${confidenceLabel(confidence)}${note}${usage ? `（${usage}）` : ''}。已填入原文框，请核对修改后按需解析。`);
+    toast('已导入原文，可先修改再解析');
+  } catch (err) {
+    if (scan.controller?.signal.aborted) setScanStatus('error', '识别超时或已取消，可重试或重新拍照。');
+    else setScanStatus('error', err.message || '识别失败，请重拍。');
+    $('toolScanRetry').hidden = !scan.lastFile;
+  } finally {
+    clearTimeout(timer);
+    scan.busy = false;
+    scan.controller = null;
+    setScanBusy(false);
+  }
 }
 
 /* ---------------- chunking ---------------- */
@@ -389,8 +471,33 @@ $('toolClearBtn').addEventListener('click', () => {
   updateCount();
   saveDraft();
   resetResults();
+  if (!scan.busy) clearScanPhoto();
   input.focus();
 });
+$('toolScanBtn').addEventListener('click', () => $('toolScanFile').click());
+$('toolScanFile').addEventListener('change', e => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  const err = photoFileError(file);
+  if (err) { toast(err, 'err'); return; }
+  scan.rotate = 0;
+  runReadingScan(file);
+});
+$('toolScanRotate').addEventListener('click', () => {
+  if (!scan.lastFile || scan.busy) return;
+  scan.rotate = (scan.rotate + 90) % 360;
+  runReadingScan(scan.lastFile, { bypassCache: true });
+});
+$('toolScanRetry').addEventListener('click', () => { if (scan.lastFile) runReadingScan(scan.lastFile, { bypassCache: true }); });
+$('toolScanClear').addEventListener('click', () => { if (!scan.busy) clearScanPhoto(); });
+wirePhotoDropPaste($('toolScanBox') || input, file => {
+  if (scan.busy) return;
+  const err = photoFileError(file);
+  if (err) { toast(err, 'err'); return; }
+  scan.rotate = 0;
+  runReadingScan(file);
+}, { onError: msg => toast(msg, 'err') });
 $('toolTransBtn').addEventListener('click', loadTranslation);
 $('toolVocabBtn').addEventListener('click', loadVocab);
 $('toolGrammarBtn').addEventListener('click', loadGrammar);

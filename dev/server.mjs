@@ -1,8 +1,8 @@
 // DEV ONLY — local preview runner for the CET StudyHack reading lab + reference
 // estimator. Serves web/ and routes /functions/v1/app to the REAL application
 // handler (functions/handler.mjs) with a credential-free fake Cloud upstream
-// that answers train / explain / grade / recommend (transfer comes from the
-// real vetted bank). Exercises actual routing, validation, SSE projection and
+// that answers train / explain / grade / recommend / scan (transfer comes from
+// the real vetted bank). Exercises actual routing, validation, SSE projection and
 // prompt building; only the QCA transport is simulated. Never deployed: the
 // production Function uses the real cloud-agents client.
 import http from 'node:http';

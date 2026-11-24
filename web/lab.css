@@ -258,6 +258,71 @@ mark { background: #fde68a; color: #7c2d12; padding: 0 3px; border-radius: 3px; 
 .view-estimator .ai-comment .ac-missing { margin: 6px 0 0; font-size: calc(11.5px * var(--site-type, 1)); color: var(--warn); background: var(--warn-soft); padding: 7px 10px; border-radius: var(--r-sm); }
 .view-estimator .material-input { min-height: 70px !important; background: color-mix(in srgb, var(--site-bg) 45%, var(--site-surface)) !important; }
 
+/* inline photo import (reading tool + writing / translation AI boxes) */
+.scan-inline { display: flex; flex-direction: column; gap: 8px; }
+.scan-inline-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.scan-inline-hint { font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.5; }
+.scan-inline .scan-status { margin: 0; }
+.scan-status[data-state="warn"] { color: var(--warn); background: var(--warn-soft); }
+.scan-status[hidden] { display: none !important; }
+.scan-preview { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--r-sm); border: 1px solid var(--site-border); background: var(--site-surface); }
+.scan-preview[hidden] { display: none; }
+.scan-preview img { width: 96px; height: 96px; flex: 0 0 auto; object-fit: cover; border-radius: 8px; border: 1px solid var(--site-border); background: var(--site-bg); }
+.scan-preview span { font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.65; }
+.scan-preview.compact { padding: 6px; }
+.scan-preview.compact img { width: 64px; height: 64px; }
+@media (max-width: 560px) {
+  .scan-inline-row .btn { flex: 1 1 100%; white-space: normal; text-align: center; }
+  .scan-inline-row .scan-inline-hint { flex: 1 1 100%; }
+  .scan-preview img { width: 76px; height: 76px; }
+}
+
+/* photo vs recognised text: stacks in narrow columns, side-by-side when the
+   container is wide enough (estimator AI box is narrow, lab main is wider) */
+.scan-inline { container-type: inline-size; }
+.scan-review { display: grid; grid-template-columns: 1fr; gap: 10px; padding: 8px; border-radius: var(--r-sm); border: 1px solid var(--site-border); background: var(--site-surface); }
+.scan-review[hidden] { display: none; }
+.scan-review-img { display: flex; align-items: flex-start; justify-content: center; overflow: hidden; border-radius: 8px; background: var(--site-bg); border: 1px solid var(--site-border); }
+.scan-review-img img { display: block; width: 100%; max-height: 240px; object-fit: contain; }
+.scan-review-text { min-width: 0; max-height: 280px; overflow: auto; font-size: calc(12.5px * var(--site-type, 1)); line-height: 1.7; color: var(--site-text); }
+@container (min-width: 640px) {
+  .scan-review { grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.1fr); }
+  .scan-review-img img { max-height: 340px; }
+  .scan-review-text { max-height: 340px; }
+}
+.scan-review-block + .scan-review-block { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--site-border); }
+.scan-review-block h4 { margin: 0 0 4px; font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); font-weight: 700; }
+.scan-review-block div { white-space: pre-wrap; word-break: break-word; }
+.scan-review-note { margin: 6px 0 0; font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); line-height: 1.6; }
+.scan-usage { font-size: calc(11.5px * var(--site-type, 1)); color: var(--site-muted); }
+.scan-usage[hidden] { display: none; }
+mark.uncertain { background: color-mix(in srgb, var(--warn) 24%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.scan-question-list { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: var(--r-sm); border: 1px dashed var(--site-border); background: color-mix(in srgb, var(--site-bg) 55%, var(--site-surface)); }
+.scan-q-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.scan-q-btn { font: inherit; font-size: calc(12px * var(--site-type, 1)); padding: 5px 10px; border-radius: var(--r-pill); border: 1px solid var(--site-border); background: var(--site-surface); color: var(--site-text); cursor: pointer; }
+.scan-q-btn.active { border-color: var(--site-accent); background: var(--accent-soft); color: var(--accent-deep); font-weight: 700; }
+@media (max-width: 720px) {
+  .scan-review { grid-template-columns: 1fr; }
+  .scan-review-img img { max-height: 240px; }
+  .scan-review-text { max-height: 260px; }
+}
+
+/* detailed grade report */
+.view-estimator .grade-detail { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--site-border); }
+.view-estimator .grade-detail-head { display: flex; justify-content: space-between; align-items: baseline; font-size: calc(11.5px * var(--site-type, 1)); font-weight: 700; color: var(--site-muted); margin-bottom: 6px; }
+.view-estimator .grade-errors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.view-estimator .ge-item { padding: 8px 10px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--site-bg) 45%, var(--site-surface)); border: 1px solid var(--site-border); font-size: calc(12px * var(--site-type, 1)); line-height: 1.65; }
+.view-estimator .ge-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.view-estimator .ge-type { font-size: calc(10.5px * var(--site-type, 1)); font-weight: 700; color: var(--bad); background: var(--bad-soft); padding: 1px 7px; border-radius: var(--r-pill); }
+.view-estimator .ge-top mark { background: color-mix(in srgb, var(--bad) 18%, transparent); color: inherit; padding: 0 2px; border-radius: 3px; }
+.view-estimator .ge-fix { margin-top: 4px; color: var(--ok); }
+.view-estimator .ge-note { margin-top: 2px; color: var(--site-muted); font-size: calc(11.5px * var(--site-type, 1)); }
+.view-estimator .grade-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.view-estimator .gs-chip { font-size: calc(10.5px * var(--site-type, 1)); padding: 2px 8px; border-radius: var(--r-pill); background: var(--warn-soft); color: var(--warn); }
+.view-estimator .grade-suggest { margin-top: 8px; font-size: calc(12px * var(--site-type, 1)); line-height: 1.7; }
+.view-estimator .grade-suggest ul { margin: 4px 0 0; padding-left: 18px; }
+.view-estimator .grade-usage { margin-top: 10px; font-size: calc(11px * var(--site-type, 1)); color: var(--site-muted); text-align: right; }
+
 /* ---------- lab responsive ---------- */
 @media (max-width: 1080px) {
   .lab-hero { grid-template-columns: 1fr; }
