@@ -18,9 +18,16 @@ const PNG_1PX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
 // Each request gets its own forwarded IP so the per-IP rate limiter (12 AI
 // calls / 10 min) does not reject the test suite itself.
 let ipSeq = 0;
-const post = (action, payload) => handler(new Request(`http://local/functions/v1/app?action=${action}`, {
+const post = (action, payload, extraHeaders = {}) => handler(new Request(`http://local/functions/v1/app?action=${action}`, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'x-forwarded-for': `10.0.0.${++ipSeq}` },
+  headers: {
+    'Content-Type': 'application/json',
+    'x-forwarded-for': `10.0.0.${++ipSeq}`,
+    // Every scan test shares one anonymous browser scope unless it asks for a
+    // different one; the cache is never reachable without a valid scope.
+    'x-cet-scan-scope': 'test-scope-default',
+    ...extraHeaders,
+  },
   body: JSON.stringify(payload),
 }));
 
@@ -401,6 +408,63 @@ const ok = name => { passed++; console.log(`  ok  ${name}`); };
   assert.equal(result.cached, false);
   assert.equal(cloud.getEventsPosted(), before + 1);
   ok('bypassCache re-runs the model when the student wants a fresh read');
+}
+
+// 18g. a different browser scope never receives the cached transcript
+{
+  const before = cloud.getEventsPosted();
+  const frames = await collect(await post('scan', {
+    target: 'writing', level: 'CET6', structured: true, image: `data:image/png;base64,${PNG_1PX}`,
+  }, { 'x-cet-scan-scope': 'test-scope-other' }));
+  const result = frames.find(f => f.type === 'result');
+  assert.ok(result && result.cached === false, 'different scope is a cache miss');
+  assert.equal(cloud.getEventsPosted(), before + 1, 'different scope runs the model');
+  const again = await collect(await post('scan', {
+    target: 'writing', level: 'CET6', structured: true, image: `data:image/png;base64,${PNG_1PX}`,
+  }, { 'x-cet-scan-scope': 'test-scope-other' }));
+  assert.equal(again.find(f => f.type === 'result')?.cached, true, 'same new scope reuses its own result');
+  ok('cache is isolated per anonymous browser scope');
+}
+
+// 18h. target is part of the key: a writing transcript cannot satisfy a reading scan
+{
+  const before = cloud.getEventsPosted();
+  const frames = await collect(await post('scan', {
+    target: 'reading', level: 'CET6', structured: true, image: `data:image/png;base64,${PNG_1PX}`,
+  }));
+  const result = frames.find(f => f.type === 'result');
+  assert.ok(result && result.cached === false, 'different target is a cache miss');
+  assert.equal(cloud.getEventsPosted(), before + 1, 'different target runs the model');
+  ok('target is part of the OCR cache key');
+}
+
+// 18i. result metadata exposes the real model id and prompt version
+{
+  const frames = await collect(await post('scan', {
+    target: 'writing', level: 'CET6', structured: true, bypassCache: true,
+    image: `data:image/png;base64,${PNG_1PX}`,
+  }));
+  const result = frames.find(f => f.type === 'result');
+  assert.equal(result?.meta?.model, 'fixture-model');
+  assert.match(result?.meta?.promptVersion || '', /^scan-/);
+  assert.ok(Number.isFinite(result?.meta?.durationMs));
+  ok('scan result reports the resolved model and prompt version');
+}
+
+// 18j. no scope means no shared cache read or write
+{
+  const before = cloud.getEventsPosted();
+  const make = () => handler(new Request('http://local/functions/v1/app?action=scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-forwarded-for': `10.0.0.${++ipSeq}` },
+    body: JSON.stringify({ target: 'writing', level: 'CET6', structured: true, image: `data:image/png;base64,${PNG_1PX}` }),
+  }));
+  const first = await collect(await make());
+  const second = await collect(await make());
+  assert.equal(first.find(f => f.type === 'result')?.cached, false);
+  assert.equal(second.find(f => f.type === 'result')?.cached, false);
+  assert.equal(cloud.getEventsPosted(), before + 2, 'unscoped requests never share a cached transcript');
+  ok('requests without a browser scope bypass the shared cache');
 }
 
 // 19. failure then retry (fake cloud fails once for FAILTEST)

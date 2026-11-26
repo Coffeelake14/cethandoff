@@ -7,6 +7,8 @@ import './lab.js';
 import './reading.js';
 import './estimator.js';
 import { initCommandCenter } from './command.js';
+import { initWorkbench } from './workbench.js';
 
 initShell();
 initCommandCenter();
+initWorkbench();

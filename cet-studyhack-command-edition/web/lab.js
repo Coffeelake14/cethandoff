@@ -320,6 +320,7 @@ function stageHead(kicker, title, extra = '') {
       <span class="stage-kicker">${escapeHtml(kicker)}</span>
       <h2>${escapeHtml(title)}</h2>
     </div>
+    <div class="stage-assembly" aria-hidden="true"><i></i><i></i><i></i></div>
     <div class="sh-actions">${extra}<button type="button" class="btn btn-sm btn-ghost" data-act="restart"><svg><use href="#i-refresh"/></svg>从头开始</button></div>
   </div>`;
 }
@@ -907,6 +908,7 @@ function currentDraft() {
 }
 
 function render() {
+  labStage.dataset.screen = state.screen;
   updateLabModeBadge();
   document.querySelectorAll('.preset').forEach(el => {
     el.classList.toggle('active', state.mode === 'preset' && el.dataset.id === state.material?.id);

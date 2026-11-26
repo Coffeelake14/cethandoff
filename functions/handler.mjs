@@ -24,6 +24,7 @@ import {
   buildScanSystemPrompt, buildScanUserPrompt,
   buildStructuredScanSystemPrompt, buildStructuredScanUserPrompt,
   buildEstimatorSystemPrompt, buildGradePrompt, buildRecommendPrompt,
+  SCAN_PROMPT_VERSION,
 } from './prompt.mjs';
 import { ensureResources } from './resources.mjs';
 import { retrieve, formatContext } from './rag.mjs';
@@ -46,6 +47,7 @@ const MAX_SCAN_UNCERTAIN = 20;
 const MAX_GRADE_ERRORS = 12;
 const SCAN_CACHE_TTL_MS = 10 * 60 * 1000;
 const SCAN_CACHE_MAX = 32;
+const SCAN_CACHE_VERSION = 1;
 const MAX_OUTPUT = 200000;
 const MAX_STREAM_MS = 120000;
 const MAX_CONCURRENT = 4;
@@ -88,8 +90,6 @@ const ESTIMATOR_PROFILE = {
   purpose: 'estimation',
 };
 const SCAN_PROFILE = {
-  // v2: structured document extraction + vision preference.
-  scope: 'cet-writing-scan:v2:prod:cn',
   envName: 'CET Writing Scan Environment',
   agentName: '四六级写译拍照识别',
   metadata: { app: 'cet-writing-scan' },
@@ -97,6 +97,18 @@ const SCAN_PROFILE = {
   vision: true,
   modelEnv: 'CET_SCAN_MODEL',
 };
+
+// Structured and plain scans use different system prompts. They must not share
+// one cached Agent, otherwise whichever mode boots first fixes the prompt for
+// the other mode. The prompt version also makes a prompt edit self-invalidating.
+function scanProfile(structured) {
+  const mode = structured ? 'structured' : 'text';
+  return {
+    ...SCAN_PROFILE,
+    scope: `cet-writing-scan:${mode}:${SCAN_PROMPT_VERSION}:prod:cn`,
+    agentName: `${SCAN_PROFILE.agentName}-${mode}`,
+  };
+}
 
 const ERROR_MESSAGES = {
   ai_not_configured: 'AI 服务尚未配置完成，请稍后再试。',
@@ -435,6 +447,15 @@ function cleanImage(image, mediaType) {
   return { mediaType: mime, base64: data, bytes };
 }
 
+// Cache entries are scoped to an anonymous browser session. Without a valid
+// scope the request still runs, but it neither reads nor writes the shared
+// in-memory cache, so one visitor can never receive another visitor's result.
+function cleanScanScope(value) {
+  if (typeof value !== 'string') return '';
+  const scope = value.trim();
+  return /^[A-Za-z0-9_-]{8,64}$/.test(scope) ? scope : '';
+}
+
 // The browser computes the reference estimate with the shared engine; validate
 // its shape before using it to ground retrieval and the recommendation prompt.
 // No pass probability is part of the contract anymore.
@@ -486,8 +507,9 @@ export function createAppHandler({ cloud, mode = 'live' }) {
   let active = 0;
   const hits = new Map();
   // Process-local, short-lived cache of recognised text keyed by a SHA-256 of
-  // the uploaded bytes + target + mode. Photos are never stored; only the
-  // validated JSON result is kept, and only to avoid a duplicate credit spend.
+  // the uploaded bytes + an anonymous browser scope + target + mode + resolved
+  // model + prompt version. Photos are never stored; only the validated JSON
+  // result is kept, and only to avoid a duplicate credit spend.
   const scanCache = new Map();
 
   function scanCacheGet(key) {
@@ -506,13 +528,23 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const hash = await crypto.subtle.digest('SHA-256', bytes);
     return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
   }
-  function cachedStream(result) {
+  function cachedStream(result, binding) {
     const encoder = new TextEncoder();
     const body = new ReadableStream({
       start(controller) {
         const send = obj => controller.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(obj)}\n\n`));
         send({ type: 'status', state: 'running', message: '已找到同一张照片的识别结果，直接复用…' });
-        send({ type: 'result', ...result, cached: true, usage: null, meta: { model: null, visionDeclared: false, modelSource: null, durationMs: 0, cached: true } });
+        send({
+          type: 'result', ...result, cached: true, usage: null,
+          meta: {
+            model: typeof binding?.model === 'string' ? binding.model : null,
+            visionDeclared: binding?.visionDeclared === true,
+            modelSource: binding?.modelSource || null,
+            promptVersion: SCAN_PROMPT_VERSION,
+            durationMs: 0,
+            cached: true,
+          },
+        });
         send({ type: 'done', state: 'completed' });
         controller.close();
       },
@@ -553,7 +585,10 @@ export function createAppHandler({ cloud, mode = 'live' }) {
   //   kind 'grade'  -> collect text, parse strict JSON, emit result
   //   kind 'train'  -> collect text, parse + validate diagnosis JSON, emit result
   //   kind 'scan'   -> collect text, parse strict JSON transcription, emit result
-  function runStream(request, { prompt, title, kind, profile, systemPrompt, runningMessage, trainContext, gradeContext, scanContext, image }) {
+  function runStream(request, {
+    prompt, title, kind, profile, systemPrompt, runningMessage, trainContext,
+    gradeContext, scanContext, image, binding: initialBinding = null, promptVersion = '',
+  }) {
     const encoder = new TextEncoder();
     const startedAt = performance.now();
     const lifetime = new AbortController();
@@ -562,7 +597,7 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     const timer = setTimeout(() => lifetime.abort(), MAX_STREAM_MS);
     let upstream = null;
     let slotTaken = false;
-    let binding = null;
+    let binding = initialBinding;
     let usage = null;
     let requestCredits = null;
     const usageOut = () => {
@@ -578,6 +613,7 @@ export function createAppHandler({ cloud, mode = 'live' }) {
       model: typeof binding?.model === 'string' ? binding.model : null,
       visionDeclared: binding?.visionDeclared === true,
       modelSource: binding?.modelSource || null,
+      promptVersion,
       durationMs: Math.round(performance.now() - startedAt),
     });
 
@@ -631,7 +667,7 @@ export function createAppHandler({ cloud, mode = 'live' }) {
           active += 1;
           slotTaken = true;
           send({ type: 'status', state: 'initializing', message: '正在准备 AI 引擎…' });
-          binding = await ensureResources(cloud, profile.scope, systemPrompt, profile);
+          if (!binding) binding = await ensureResources(cloud, profile.scope, systemPrompt, profile);
           if (lifetime.signal.aborted) throw new Error('aborted');
 
           const session = await cloud.request('/api/v1/cloud/sessions', {
@@ -831,22 +867,44 @@ export function createAppHandler({ cloud, mode = 'live' }) {
     if (!image) return jsonError('invalid_image', '图片格式无效，请上传 JPG / PNG / WebP 照片。', 400);
     const structured = payload?.mode === 'structured' || payload?.structured === true;
     const maxChars = target === 'reading' ? MAX_SCAN_READING : MAX_ESSAY;
-    const cacheKey = `${target}:${level}:${structured ? 'structured' : 'text'}:${await imageDigest(image.bytes)}`;
-    if (payload?.bypassCache !== true) {
+    const profile = scanProfile(structured);
+    const systemPrompt = structured ? buildStructuredScanSystemPrompt() : buildScanSystemPrompt();
+    const userPrompt = structured
+      ? buildStructuredScanUserPrompt({ target, level })
+      : buildScanUserPrompt({ target, level });
+
+    // The model id is part of the cache key, so it must be resolved before the
+    // lookup. ensureResources is process-cached and does not spend credits.
+    let binding;
+    try {
+      binding = await ensureResources(cloud, profile.scope, systemPrompt, profile);
+    } catch (error) {
+      const mapped = mapError(error);
+      return jsonError(mapped.code, mapped.message, 502);
+    }
+
+    const cacheScope = cleanScanScope(request.headers.get('x-cet-scan-scope'));
+    const cacheKey = cacheScope
+      ? [
+        SCAN_CACHE_VERSION, await imageDigest(image.bytes), target, level,
+        structured ? 'structured' : 'text', binding.model, SCAN_PROMPT_VERSION, cacheScope,
+      ].join(':')
+      : '';
+    if (cacheKey && payload?.bypassCache !== true) {
       const hit = scanCacheGet(cacheKey);
-      if (hit) return cachedStream(hit);
+      if (hit) return cachedStream(hit, binding);
     }
     const blocked = guard(request);
     if (blocked) return blocked;
     const label = target === 'reading' ? '阅读材料' : target === 'translation' ? '翻译' : '作文';
     return runStream(request, {
-      prompt: structured
-        ? buildStructuredScanUserPrompt({ target, level })
-        : buildScanUserPrompt({ target, level }),
+      prompt: userPrompt,
       title: structured ? `四六级${label}结构化拍照识别` : `四六级${label}拍照识别`,
       kind: 'scan',
-      profile: SCAN_PROFILE,
-      systemPrompt: structured ? buildStructuredScanSystemPrompt() : buildScanSystemPrompt(),
+      profile,
+      systemPrompt,
+      binding,
+      promptVersion: SCAN_PROMPT_VERSION,
       runningMessage: structured ? '正在识别文字并提取题目结构…' : '正在识别文字…',
       scanContext: { mode: structured ? 'structured' : 'text', target, maxChars, cacheKey },
       image,

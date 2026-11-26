@@ -11,8 +11,44 @@ const MAX_RAW_BYTES = 20 * 1024 * 1024;
 const MAX_EDGE = 2000;
 const MAX_DATA_URL = 1800000;
 const API = '/functions/v1/app';
+// Must match SCAN_PROMPT_VERSION in functions/prompt.mjs. It invalidates the
+// session-local cache when the recognition contract changes.
+const SCAN_PROMPT_VERSION = 'scan-2026-11-24';
+const SCOPE_KEY = 'cet.scan.scope.v1';
+const MODEL_KEY = 'cet.scan.model.v1';
 const localCache = new Map();
 const LOCAL_CACHE_MAX = 12;
+
+// The server cache is shared by all visitors of a Function instance. A random
+// per-tab scope keeps a cached transcript from crossing browser sessions.
+function scanScope() {
+  try {
+    let scope = sessionStorage.getItem(SCOPE_KEY);
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(scope || '')) {
+      const raw = typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      scope = raw.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+      sessionStorage.setItem(SCOPE_KEY, scope);
+    }
+    return scope;
+  } catch {
+    return '';
+  }
+}
+
+function currentModelEpoch() {
+  try { return sessionStorage.getItem(MODEL_KEY) || 'unknown'; } catch { return 'unknown'; }
+}
+
+function noteScanModel(model) {
+  if (typeof model !== 'string' || !model) return;
+  try {
+    const previous = sessionStorage.getItem(MODEL_KEY);
+    if (previous && previous !== model) localCache.clear();
+    sessionStorage.setItem(MODEL_KEY, model);
+  } catch { /* storage unavailable */ }
+}
 
 export function photoFileError(file) {
   if (!file) return '请选择一张照片。';
@@ -152,7 +188,11 @@ export async function transcribePhoto(file, {
   onStatus?.('loading', '正在压缩照片…');
   const prepared = await preparePhoto(file, { rotate });
   onPreview?.(prepared.dataUrl);
-  const key = `${target}|${level}|${structured ? 1 : 0}|${prepared.hash}`;
+  const scope = scanScope();
+  const key = [
+    SCAN_PROMPT_VERSION, scope, target, level, structured ? 1 : 0,
+    currentModelEpoch(), prepared.hash,
+  ].join('|');
   if (!bypassCache) {
     const hit = cacheGet(key);
     if (hit) {
@@ -163,7 +203,7 @@ export async function transcribePhoto(file, {
   onStatus?.('loading', '正在识别文字…');
   const res = await fetch(`${API}?action=scan`, {
     method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(scope ? { 'x-cet-scan-scope': scope } : {}) },
     body: JSON.stringify({
       target, level, structured, image: prepared.dataUrl,
       ...(bypassCache ? { bypassCache: true } : {}),
@@ -194,6 +234,7 @@ export async function transcribePhoto(file, {
   if (!result) throw new Error('识别没有返回结果，请重拍。');
   const normalized = normalizeResult(result);
   if (!normalized.text) throw new Error('没有识别到清晰文字，请正对纸张重拍。');
+  noteScanModel(normalized.meta?.model);
   normalized.image = prepared.dataUrl;
   normalized.hash = prepared.hash;
   cacheSet(key, { ...normalized, image: '', hash: '' });

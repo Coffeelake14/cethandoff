@@ -119,6 +119,7 @@ export function setStatus(state, text) {
 
 let activeTab = 'command';
 let returnTab = 'reading';
+let mode = 'command';
 
 export function currentTab() {
   return activeTab;
@@ -128,30 +129,37 @@ export function showTab(key, persist = true) {
   const active = TABS.find(t => t.key === key) || TABS.find(t => t.key === 'command');
   const previous = activeTab;
   activeTab = active.key;
-  if (active.key === 'command' && previous !== 'command') returnTab = previous === 'estimator' ? 'estimator' : 'reading';
+  if (active.key === 'command') {
+    if (previous !== 'command') returnTab = previous;
+    mode = 'command';
+  }
   for (const t of TABS) {
     const on = t.key === active.key;
     $(t.tab).setAttribute('aria-selected', String(on));
     $(t.tab).tabIndex = on ? 0 : -1;
     $(t.view).classList.toggle('active', on);
   }
-  const mode = active.key === 'command' ? 'command' : 'simple';
   document.body.dataset.view = active.key;
   document.body.dataset.mode = mode;
-  $('commandReturn').hidden = mode !== 'command';
+  $('commandReturnLabel').textContent = mode === 'command' ? '简约模式' : '科技模式';
+  $('commandTabLabel').textContent = mode === 'command' ? '作战中心' : '返回作战中心';
   document.title = active.title;
   $('brandSub').textContent = mode === 'command'
     ? 'CET 作战中心'
     : '简约模式 · 错因实验室 / 参考估分';
+  if (previous !== active.key) window.scrollTo({ top: 0, behavior: 'instant' });
   if (active.key !== 'command' && persist) {
     try { localStorage.setItem('cet.tab', active.key); } catch {}
   }
   window.dispatchEvent(new CustomEvent('cet:viewchange', { detail: { key: active.key, previous, returnTab, mode } }));
 }
 
-export function returnToLearning() {
-  showTab(returnTab);
-  $(returnTab === 'estimator' ? 'tab-estimator' : 'tab-reading')?.focus();
+function toggleDisplayMode() {
+  const fromCommand = activeTab === 'command';
+  const target = fromCommand ? returnTab : activeTab;
+  mode = mode === 'command' ? 'simple' : 'command';
+  showTab(target);
+  if (fromCommand) $(`tab-${target}`)?.focus();
 }
 
 export function openEstimator() {
@@ -172,6 +180,7 @@ async function probeHealth() {
 }
 
 export function initShell() {
+  $('commandReturn').addEventListener('click', toggleDisplayMode);
   for (const t of TABS) {
     $(t.tab).addEventListener('click', () => showTab(t.key));
     $(t.tab).addEventListener('keydown', e => {

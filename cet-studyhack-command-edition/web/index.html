@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="lab.css" />
   <link rel="stylesheet" href="command.css" />
   <link rel="stylesheet" href="command-radar.css" />
+  <link rel="stylesheet" href="workbench.css" />
 </head>
 <body data-view="command" data-mode="command">
   <!-- icon sprite: reading lab uses #i-*, estimator uses #e-i-* -->
@@ -69,12 +70,12 @@
       <span class="status-pill" id="statusPill" data-state="checking" role="status">
         <span class="dot"></span><span class="txt" id="statusText">检测服务…</span>
       </span>
-      <button class="command-return" id="commandReturn" type="button"><svg><use href="#i-arrow"/></svg><span>简约模式</span></button>
+      <button class="command-return" id="commandReturn" type="button"><svg><use href="#i-arrow"/></svg><span id="commandReturnLabel">简约模式</span></button>
     </div>
   </header>
 
   <main class="wrap">
-    <nav class="tabnav" role="tablist" aria-label="简约模式功能切换">
+    <nav class="tabnav" role="tablist" aria-label="功能切换">
       <button class="tab" id="tab-reading" role="tab" type="button" aria-selected="false" aria-controls="view-reading" tabindex="-1">
         <svg><use href="#i-target"/></svg><span>错因实验室</span>
       </button>
@@ -82,7 +83,7 @@
         <svg><use href="#e-i-chart"/></svg><span>参考估分</span>
       </button>
       <button class="tab" id="tab-command" role="tab" type="button" aria-selected="true" aria-controls="view-command">
-        <svg><use href="#e-i-target"/></svg><span>返回作战中心</span>
+        <svg><use href="#e-i-target"/></svg><span id="commandTabLabel">作战中心</span>
       </button>
     </nav>
 
@@ -97,8 +98,10 @@
         <section class="card lab-hero">
           <div class="lh-copy">
             <span class="eyebrow"><svg width="15" height="15"><use href="#i-spark"/></svg> StudyHack · 四六级阅读错因实验室</span>
-            <h2>不只看完解析，而是验证你真的学会了</h2>
-            <p>选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
+            <h2 class="simple-intro">不只看完解析，而是验证你真的学会了</h2>
+            <p class="simple-intro">选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
+            <h2 class="workbench-intro">错因实验室</h2>
+            <p class="workbench-intro">圈出原文依据，核对错因，再做一道同类题。</p>
             <div class="lh-actions">
               <button class="btn btn-primary btn-lg" id="labStartBtn" type="button"><svg><use href="#i-spark"/></svg>开始练习</button>
               <button class="btn btn-lg-ghost" id="labCustomBtn" type="button"><svg><use href="#i-file"/></svg>使用自带材料</button>
@@ -110,6 +113,7 @@
             <div><b>证据卡</b><span>some / all 并排标记</span></div>
             <div><b>同类题</b><span>用新题验证迁移</span></div>
           </div>
+          <div class="instrument-window" data-instrument="evidence" aria-hidden="true"></div>
         </section>
 
         <div class="lab-grid">
@@ -149,6 +153,10 @@
 
       <!-- ==================== 阅读工具（按需加载） ==================== -->
       <div class="tool-panel" id="toolPanel" role="tabpanel" aria-labelledby="subtab-tool" hidden>
+        <header class="workbench-heading">
+          <h2>阅读工具</h2>
+          <div class="instrument-window" data-instrument="optics" aria-hidden="true"></div>
+        </header>
         <div class="workspace">
           <section class="input-panel" aria-label="阅读工具输入区">
             <details class="card guide" open>
@@ -324,7 +332,11 @@
                 </div>
                 <div class="graph-rulers" aria-hidden="true"><i></i><i></i></div>
               </div>
-              <div class="map-legend"><span><i></i>错因</span><span><i></i>已有记录</span><span>拖动旋转 · 点击聚焦</span></div>
+              <div class="map-legend">
+                <span><i></i>错因</span><span><i></i>已有记录</span>
+                <span class="map-hint">拖动旋转 · 点击聚焦</span>
+                <button type="button" id="graphLayers" aria-pressed="false">展开分层</button>
+              </div>
               <div class="mobile-node-bar">
                 <span>主要错因</span>
                 <button type="button" id="commandAllNodes" aria-expanded="false">全部错因 <b id="commandAllNodeCount"></b></button>
@@ -357,6 +369,10 @@
 
     <!-- ==================== 参考估分 ==================== -->
     <section class="view view-estimator" id="view-estimator" role="tabpanel" aria-labelledby="tab-estimator">
+      <header class="workbench-heading">
+        <h2>参考估分</h2>
+        <div class="instrument-window" data-instrument="calibration" aria-hidden="true"></div>
+      </header>
       <div class="disclaimer-banner" role="note">
         <svg><use href="#e-i-alert"/></svg>
         <div><b>本结果仅为参考估算，不等于官方成绩。</b> 换算基于公开常模表的插值与项目假设，存在模型误差；最终成绩以教育部教育考试院发布为准。</div>
@@ -535,6 +551,7 @@
             </div>
             <div class="card-body">
               <div class="total-row">
+                <div class="score-dial" id="est-scoreDial" aria-hidden="true"><span></span></div>
                 <div class="total-num"><span id="est-totalScore">0</span><small>/ 710</small></div>
                 <div class="total-side">
                   <div class="range-line">参考区间 <b id="est-totalRange">0 – 0</b></div>

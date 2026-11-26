@@ -11,6 +11,11 @@
 
 /* ---------------- shared */
 
+// Bump whenever the scan system/user prompts change. The OCR result cache and
+// the Agent scope both include this value, so a prompt edit cannot reuse an
+// Agent or a cached transcript produced by an older contract.
+export const SCAN_PROMPT_VERSION = 'scan-2026-11-24';
+
 const LEVEL_LABEL = level => (level === 'CET6' ? '六级（CET-6）' : '四级（CET-4）');
 
 /* ---------------- reading lab: evidence diagnosis (strict JSON) */

@@ -1,0 +1,72 @@
+diff --git a/web/command-graph.js b/web/command-graph.js
+--- a/web/command-graph.js
++++ b/web/command-graph.js
+@@ -66,7 +66,7 @@ function layoutNodes(width, height, compact) {
+     minX = Math.min(minX, left); maxX = Math.max(maxX, right);
+     minY = Math.min(minY, point.y - 24); maxY = Math.max(maxY, bottom);
+   }
+-  const availableW = Math.max(120, width - 18);
++  const availableW = Math.max(120, width - (compact ? 40 : 18));
+   const availableH = Math.max(100, height - 16);
+   const scale = Math.min(availableW / (maxX - minX), availableH / (maxY - minY), compact ? 1.16 : 1.35);
+   const centerX = (minX + maxX) / 2;
+@@ -198,6 +198,9 @@ function renderGraph() {
+   if (!refs) return;
+   const rect = refs.viewport.getBoundingClientRect();
+   if (rect.width < 80 || rect.height < 80) return;
++  const active = document.activeElement;
++  const focusId = active?.dataset.node;
++  const focusList = [refs.nodes, refs.mobileList].find(list => list.contains(active));
+   state.width = rect.width;
+   state.height = rect.height;
+   state.compact = rect.width < 768;
+@@ -224,6 +227,10 @@ function renderGraph() {
+   updateMobileList();
+   updateReticle();
+   bindNodeHover();
++  if (focusList && focusId) {
++    const button = focusList.querySelector('[data-node="' + CSS.escape(focusId) + '"]');
++    if (button?.getClientRects().length) button.focus({ preventScroll: true });
++  }
+ }
+ 
+ function bindNodeHover() {
+@@ -245,7 +252,7 @@ function updateReticle() {
+   refs.reticle.style.left = `${position.x.toFixed(2)}px`;
+   refs.reticle.style.top = `${position.y.toFixed(2)}px`;
+   refs.reticle.classList.add('is-visible');
+-  refs.reticle.classList.toggle('is-locked', !state.hover);
++  refs.reticle.classList.toggle('is-locked', !state.hover || state.hover === state.selected);
+ }
+ 
+ function setHovered(nodeId) {
+diff --git a/dev/accept-command.mjs b/dev/accept-command.mjs
+--- a/dev/accept-command.mjs
++++ b/dev/accept-command.mjs
+@@ -72,7 +72,7 @@ async function click(selector) {
+   await delay(50);
+ }
+ async function key(keyName, code, keyCode) {
+-  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, windowsVirtualKeyCode: keyCode });
++  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, windowsVirtualKeyCode: keyCode, ...(keyName === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) });
+   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code, windowsVirtualKeyCode: keyCode });
+   await delay(50);
+ }
+@@ -323,7 +323,7 @@ try {
+   await delay(350);
+   await evaluate(`document.querySelector('[data-node=causal_inversion]').focus()`);
+   await key('Enter', 'Enter', 13);
+-  check(await evaluate(`document.querySelector('[data-node=causal_inversion]').getAttribute('aria-pressed') === 'true'`), 'keyboard Enter selects graph node');
++  check(await evaluate(`document.querySelector('[data-node=causal_inversion]').getAttribute('aria-pressed') === 'true' && document.activeElement.dataset.node === 'causal_inversion'`), 'keyboard Enter selects graph node and preserves focus');
+   await click('#graphReset');
+   await delay(350);
+   const beforeDrag = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]')}; })()`);
+@@ -341,7 +341,7 @@ try {
+   const afterDrag = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]')}; })()`);
+   const nearMove = Math.hypot(afterDrag.near.x - beforeDrag.near.x, afterDrag.near.y - beforeDrag.near.y);
+   const farMove = Math.hypot(afterDrag.far.x - beforeDrag.far.x, afterDrag.far.y - beforeDrag.far.y);
+-  check(nearMove > farMove + 2, 'drag gives near and far nodes different motion', JSON.stringify({nearMove,farMove,beforeDrag,afterDrag}));
++  check(nearMove > 2 && farMove > 2 && Math.abs(nearMove - farMove) > 2, 'drag gives near and far nodes different motion', JSON.stringify({nearMove,farMove,beforeDrag,afterDrag}));
+   await click('#graphReset');
+   await delay(350);
+   const afterReset = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]'),selected:document.querySelector('[data-node=reading]').getAttribute('aria-pressed'),transform:document.getElementById('graphStage').style.transform}; })()`);

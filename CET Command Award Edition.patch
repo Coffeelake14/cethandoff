@@ -1,0 +1,988 @@
+diff --git a/web/index.html b/web/index.html
+--- a/web/index.html
++++ b/web/index.html
+@@ -13,6 +13,7 @@
+   <link rel="stylesheet" href="styles.css" />
+   <link rel="stylesheet" href="lab.css" />
+   <link rel="stylesheet" href="command.css" />
++  <link rel="stylesheet" href="command-radar.css" />
+ </head>
+ <body data-view="command" data-mode="command">
+   <!-- icon sprite: reading lab uses #i-*, estimator uses #e-i-* -->
+@@ -60,7 +61,7 @@
+       <span class="logo"><svg><use href="#i-book"/></svg></span>
+       <div class="titles">
+         <h1>四六级 <span class="thin">StudyHack</span></h1>
+-        <p class="sub" id="brandSub">CET 作战中心 · 本机学习数据</p>
++        <p class="sub" id="brandSub">CET 作战中心</p>
+       </div>
+     </div>
+     <div class="spacer"></div>
+@@ -277,13 +278,11 @@
+         <div class="command-console">
+           <div class="command-toolbar">
+             <div class="command-context">
+-              <span class="command-context-title"><span class="live-dot"></span>本机学习数据</span>
+-              <p>从错因出发，回到原文依据，再把修正迁移到新题。</p>
++              <h2>阅读作战台</h2>
+             </div>
+             <div class="command-action">
+               <div class="command-action-copy">
+-                <strong id="commandContinueTitle">开始阅读练习</strong>
+-                <span id="commandContinueText">从真实题库中选择一篇，验证你的原文依据。</span>
++                <span id="commandContinueText"></span>
+               </div>
+               <button type="button" class="command-primary" id="commandContinue">
+                 <span id="commandContinueLabel">开始阅读练习</span><svg><use href="#i-arrow"/></svg>
+@@ -293,15 +292,18 @@
+ 
+           <div class="command-grid">
+             <section class="command-panel command-performance" aria-labelledby="commandPerformanceTitle">
+-              <div class="command-section-head"><h3 id="commandPerformanceTitle">学习表现</h3><span>本机记录</span></div>
++              <div class="command-section-head"><h3 id="commandPerformanceTitle">战绩雷达</h3></div>
+               <div id="commandStorageWarning"></div>
+-              <div class="metric-list" id="commandMetrics"></div>
+-              <p class="command-footnote">仅统计真实公开诊断；AI 判断保留来源，不替代原文核对。</p>
++              <div id="commandRadar" class="command-radar"></div>
++              <details class="command-metric-details">
++                <summary>练习统计</summary>
++                <div class="metric-list" id="commandMetrics"></div>
++              </details>
+             </section>
+ 
+             <section class="command-panel command-graph-panel" aria-labelledby="commandGraphTitle">
+               <div class="command-section-head command-graph-head">
+-                <div><h3 id="commandGraphTitle">阅读训练拓扑</h3><p id="commandGraphStatus" role="status">正在读取本机记录…</p></div>
++                <div><h3 id="commandGraphTitle">错因沙盘</h3><p id="commandGraphStatus" role="status">正在读取练习记录…</p></div>
+                 <div class="graph-controls" role="group" aria-label="图谱缩放">
+                   <button type="button" id="graphZoomIn" aria-label="放大图谱">＋</button>
+                   <button type="button" id="graphZoomOut" aria-label="缩小图谱">−</button>
+@@ -320,9 +322,11 @@
+                     <i></i><i></i><i></i><i></i>
+                   </div>
+                 </div>
++                <div class="graph-rulers" aria-hidden="true"><i></i><i></i></div>
+               </div>
++              <div class="map-legend"><span><i></i>错因</span><span><i></i>已有记录</span><span>拖动旋转 · 点击聚焦</span></div>
+               <div class="mobile-node-bar">
+-                <span>图内显示核心与 3 个主要错因</span>
++                <span>主要错因</span>
+                 <button type="button" id="commandAllNodes" aria-expanded="false">全部错因 <b id="commandAllNodeCount"></b></button>
+               </div>
+               <div class="mobile-node-list" id="commandMobileNodes" role="group" aria-label="全部阅读错因节点" hidden></div>
+@@ -330,11 +334,11 @@
+ 
+             <aside class="command-side">
+               <section class="command-panel command-detail-panel" aria-labelledby="commandDetailTitle">
+-                <div class="command-section-head"><h3 id="commandDetailTitle">选中对象</h3><span>点击节点查看</span></div>
++                <div class="command-section-head"><h3 id="commandDetailTitle">当前目标</h3></div>
+                 <div class="node-detail" id="commandNodeDetail" aria-live="polite"></div>
+               </section>
+               <section class="command-panel command-monitor" aria-labelledby="commandMonitorTitle">
+-                <div class="command-section-head"><h3 id="commandMonitorTitle">错因监测</h3><span>按真实记录排序</span></div>
++                <div class="command-section-head"><h3 id="commandMonitorTitle">错因记录</h3></div>
+                 <div class="monitor-list" id="commandMonitor"></div>
+               </section>
+             </aside>
+@@ -342,7 +346,7 @@
+ 
+           <section class="command-panel command-logs" aria-labelledby="commandLogTitle">
+             <div class="command-section-head">
+-              <div><h3 id="commandLogTitle">练习日志</h3><p>本机近 100 条练习记录 · 按公开诊断时间倒序</p></div>
++              <div><h3 id="commandLogTitle">练习日志</h3><p>最近 100 条本机记录</p></div>
+               <button type="button" class="command-text-btn" id="commandShowAll" hidden>查看全部</button>
+             </div>
+             <div class="log-list" id="commandLogs"></div>
+diff --git a/web/shell.js b/web/shell.js
+--- a/web/shell.js
++++ b/web/shell.js
+@@ -141,7 +141,7 @@ export function showTab(key, persist = true) {
+   $('commandReturn').hidden = mode !== 'command';
+   document.title = active.title;
+   $('brandSub').textContent = mode === 'command'
+-    ? 'CET 作战中心 · 本机学习数据'
++    ? 'CET 作战中心'
+     : '简约模式 · 错因实验室 / 参考估分';
+   if (active.key !== 'command' && persist) {
+     try { localStorage.setItem('cet.tab', active.key); } catch {}
+diff --git a/web/command.css b/web/command.css
+--- a/web/command.css
++++ b/web/command.css
+@@ -12,18 +12,17 @@ body[data-view="command"] {
+   background-color: var(--command-bg);
+ }
+ 
+-body[data-view="command"] .wrap { max-width: 1600px; }
++body[data-view="command"] .wrap { max-width: 1720px; --gap: 18px; }
+ body[data-mode="command"] .tabnav { display: none; }
+ body[data-view="command"] .bg {
+   background-color: var(--command-bg);
+-  background-image: linear-gradient(rgba(55, 217, 232, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(55, 217, 232, .035) 1px, transparent 1px);
+-  background-size: 32px 32px;
++  background-image: radial-gradient(ellipse at 50% 6%, #1f3749 0%, transparent 57%);
+ }
+ body[data-view="command"] .bg .orb { display: none; }
+ body[data-view="command"] .header { background: rgba(7, 17, 31, .94); border-color: var(--command-border); }
+ body[data-view="command"] .brand .titles h1 { color: var(--command-text); }
+ body[data-view="command"] .brand .titles .sub { color: var(--command-muted); }
+-body[data-view="command"] .brand .logo { background: var(--command-cyan); color: var(--command-bg); box-shadow: 0 0 20px rgba(55, 217, 232, .16); }
++body[data-view="command"] .brand .logo { background: #152837; color: var(--command-cyan); box-shadow: none; border: 1px solid #335360; border-radius: 3px; }
+ body[data-view="command"] .status-pill { color: var(--command-muted); background: #0b1727; border-color: var(--command-border); }
+ body[data-view="command"] .status-pill[data-state="ready"] { color: var(--command-green); }
+ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: var(--command-green); box-shadow: 0 0 0 4px rgba(66, 213, 161, .1); }
+@@ -55,57 +54,55 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .view-command button { font: inherit; }
+ .view-command button:focus-visible, .command-return:focus-visible { outline: 2px solid var(--command-cyan); outline-offset: 3px; }
+ 
+-.command-shell { max-width: 1600px; margin: 0 auto; }
++.command-shell { max-width: 1720px; margin: 0 auto; }
+ .command-console {
+   overflow: hidden;
+-  border: 1px solid var(--command-border);
+-  border-radius: 10px;
++  border: 1px solid #425b6d;
++  border-radius: 3px;
+   background: var(--command-surface);
+-  box-shadow: 0 22px 70px rgba(0, 0, 0, .2);
++  box-shadow: 0 20px 55px #02060b80;
+ }
+ .command-toolbar {
+   min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 22px;
+-  padding: 10px 16px; border-bottom: 1px solid var(--command-border);
+-  background: linear-gradient(90deg, rgba(55, 217, 232, .035), transparent 40%);
++  padding: 10px 20px; border-bottom: 1px solid #3d5365;
++  background: linear-gradient(108deg, #213545 0%, #142433 46%, #0c1a28 100%);
+ }
+-.command-context { min-width: 0; }
+-.command-context-title {
+-  display: inline-flex; align-items: center; gap: 8px;
+-  color: var(--command-cyan); font-size: 11px; font-weight: 700; letter-spacing: .08em;
++.command-context { min-width: 0; border-left: 3px solid var(--command-cyan); padding-left: 12px; }
++.command-context h2 {
++  margin: 0; color: #ecf8fc; font-size: clamp(24px, 2.7vw, 37px);
++  font-weight: 800; letter-spacing: .065em; line-height: 1.15;
+ }
+-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--command-cyan); box-shadow: 0 0 10px rgba(55, 217, 232, .5); }
+-.command-context p { margin: 3px 0 0; color: var(--command-muted); font-size: 11px; white-space: nowrap; }
+ .command-action { display: flex; align-items: center; gap: 14px; min-width: 0; }
+-.command-action-copy { display: grid; gap: 1px; text-align: right; }
+-.command-action-copy strong { color: var(--command-text); font-size: 12px; }
+-.command-action-copy span { color: var(--command-muted); font-size: 10px; white-space: nowrap; }
++.command-action-copy { min-width: 0; text-align: right; }
++.command-action-copy span { display: block; color: var(--command-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++.command-action-copy:has(span:empty) { display: none; }
+ .command-primary, .command-text-btn, .graph-controls button, .node-train, .mobile-node-bar button {
+-  min-height: 44px; border: 1px solid var(--command-border); border-radius: 5px; cursor: pointer;
++  min-height: 44px; border: 1px solid var(--command-border); border-radius: 2px; cursor: pointer;
+ }
+ .command-primary {
+   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+-  min-height: 46px; padding: 0 16px; color: #04252b; border-color: var(--command-cyan);
+-  background: var(--command-cyan); font-size: 12px; font-weight: 800; white-space: nowrap;
++  min-height: 46px; padding: 0 16px; color: #10202d; border-color: #d0e6e7;
++  background: #d0e6e7; font-size: 12px; font-weight: 800; white-space: nowrap;
+ }
+ .command-primary:hover { filter: brightness(1.08); }
+ .command-primary svg { width: 18px; height: 18px; flex: 0 0 18px; }
+ 
+ .command-grid {
+   display: grid;
+-  grid-template-columns: minmax(210px, 224px) minmax(0, 1fr) minmax(250px, 280px);
++  grid-template-columns: minmax(242px, 272px) minmax(0, 1fr) minmax(240px, 265px);
+   grid-template-areas: "performance graph side";
+-  align-items: start;
++  align-items: stretch;
+   border-bottom: 1px solid var(--command-border);
+ }
+ .command-panel { position: relative; min-width: 0; }
+-.command-performance { grid-area: performance; border-right: 1px solid var(--command-border); }
++.command-performance { grid-area: performance; border-right: 1px solid var(--command-border); background: linear-gradient(180deg, #112634, #0c1825 81%); }
+ .command-graph-panel { grid-area: graph; background: var(--command-bg); }
+-.command-side { grid-area: side; border-left: 1px solid var(--command-border); }
++.command-side { grid-area: side; border-left: 1px solid var(--command-border); background: linear-gradient(180deg, #142432, #0c1825 81%); }
+ .command-section-head {
+   min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+   padding: 12px 15px; border-bottom: 1px solid var(--command-border);
+ }
+-.command-section-head h3 { margin: 0; font-size: 13px; letter-spacing: .03em; }
++.command-section-head h3 { margin: 0; font-size: 14px; letter-spacing: .045em; }
+ .command-section-head > span, .command-section-head p {
+   margin: 0; color: var(--command-muted); font-size: 10px; line-height: 1.5;
+ }
+@@ -118,17 +115,19 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ .metric:last-child { border-bottom: 0; }
+ .metric-label { color: var(--command-muted); font-size: 11px; line-height: 1.35; }
+-.metric-value { grid-row: span 2; color: var(--command-text); font: 700 21px/1 ui-monospace, SFMono-Regular, Consolas, monospace; }
++.metric-value { grid-row: span 2; color: var(--command-text); font: 700 25px/1 ui-monospace, SFMono-Regular, Consolas, monospace; }
+ .metric.is-empty .metric-value { color: #6c8099; }
+ .metric.is-success .metric-value { color: var(--command-green); }
+ .metric-sample { color: #8296ad; font: 9px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+-.command-footnote { margin: 10px 15px 14px; color: #8296ad; font-size: 9.5px; line-height: 1.65; }
++.command-metric-details { border-top: 1px solid var(--command-border); }
++.command-metric-details summary { padding: 10px 15px; color: #b1cbd8; cursor: pointer; font-size: 11px; }
++.command-metric-details summary:hover { color: #e8fafc; }
+ .storage-warning {
+   margin: 10px 15px 0; padding: 8px 10px; border: 1px solid #765b3c; border-radius: 4px;
+   color: var(--command-amber); background: rgba(242, 179, 93, .06); font-size: 10px;
+ }
+ 
+-.command-graph-head { background: #0b1726; }
++.command-graph-head { background: #0a1826; }
+ .command-graph-head > div:first-child { min-width: 0; }
+ .command-graph-head p { max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .graph-controls { display: flex; gap: 4px; flex: 0 0 auto; }
+@@ -141,16 +140,16 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-viewport {
+   position: relative; height: clamp(420px, 48vh, 480px); overflow: hidden;
+   background:
+-    radial-gradient(ellipse at 50% 48%, rgba(55, 217, 232, .09), transparent 52%),
+-    linear-gradient(rgba(55, 217, 232, .028) 1px, transparent 1px),
+-    linear-gradient(90deg, rgba(55, 217, 232, .028) 1px, transparent 1px),
+-    #07111f;
++    radial-gradient(ellipse at 50% 40%, #103647 0%, transparent 65%),
++    linear-gradient(#699ca015 1px, transparent 1px),
++    linear-gradient(90deg, #699ca015 1px, transparent 1px), #050e19;
+   background-size: auto, 32px 32px, 32px 32px, auto;
+   cursor: grab; touch-action: pan-y;
+ }
+ .graph-viewport::before {
+-  content: ""; position: absolute; inset: 0; pointer-events: none;
+-  background: radial-gradient(circle at 50% 50%, transparent 38%, rgba(7, 17, 31, .68) 88%);
++  content: ""; position: absolute; inset: 10px; pointer-events: none;
++  border: 1px solid #658e9e38;
++  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, 10px 10px, 10px calc(100% - 10px), calc(100% - 10px) calc(100% - 10px), calc(100% - 10px) 10px, 10px 10px);
+   animation: grid-in .5s ease both;
+ }
+ .graph-viewport::after {
+@@ -160,6 +159,10 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ .graph-viewport.is-scanning::after { animation: scan-sweep .48s ease-out both; }
+ .graph-viewport.dragging { cursor: grabbing; }
++.graph-rulers { pointer-events: none; position: absolute; inset: 8px; }
++.graph-rulers i { position: absolute; top: 0; bottom: 0; width: 5px; background: repeating-linear-gradient(180deg, #9de1dc42 0 1px, transparent 1px 12px); }
++.graph-rulers i:first-child { left: 0; }
++.graph-rulers i:last-child { right: 0; }
+ .graph-stage {
+   position: absolute; inset: 0;
+   transform: translate3d(0, 0, 0);
+@@ -168,27 +171,35 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ .graph-viewport.dragging .graph-stage { transition: none; }
+ .orbit-map { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+-.orbit-ring { fill: none; stroke: var(--command-cyan); stroke-width: .7; stroke-opacity: .13; vector-effect: non-scaling-stroke; }
+-.orbit-ring.is-mid { stroke-opacity: .09; }
+-.orbit-ring.is-far { stroke-opacity: .06; stroke-dasharray: 2 7; }
++.orbit-ring { fill: none; stroke: #8eb9c5; stroke-width: .8; stroke-opacity: .26; vector-effect: non-scaling-stroke; stroke-dasharray: 2 5; }
++.orbit-ring.is-mid { stroke-opacity: .19; stroke-dasharray: none; }
++.orbit-ring.is-far { stroke-opacity: .29; stroke-dasharray: 10 5 2 5; }
+ .orbit-axis { fill: none; stroke: var(--command-cyan); stroke-width: .7; stroke-opacity: .1; stroke-dasharray: 3 9; }
+-.orbit-tick { stroke: var(--command-cyan); stroke-width: .8; stroke-opacity: .2; }
++.orbit-tick { stroke: #9dd5d8; stroke-width: 1; stroke-opacity: .43; }
+ .orbit-star { fill: #a6dce3; opacity: .2; }
+ .core-glow { fill: url(#commandCoreGlow); }
+-.idle-orbiter {
+-  fill: var(--command-cyan); opacity: .5; transform-box: view-box; transform-origin: center;
+-  animation: orbit-drift 20s linear infinite;
+-}
+-.command-console.is-paused .idle-orbiter { animation-play-state: paused; }
++.field-plane { fill: none; stroke: url(#commandPlaneLight); stroke-width: 1; }
++.projection-base { fill: #10536318; stroke: #7de0e04d; stroke-width: 1; stroke-dasharray: 1 3; }
++.projection-base-inner { fill: none; stroke: #458f9c72; stroke-width: 1; }
++.orbit-mesh { fill: none; }
++.orbit-mesh-back { stroke: #5ea5b0; stroke-width: .65; stroke-opacity: .26; }
++.orbit-mesh-front { stroke: #8ae3e9; stroke-width: .8; stroke-opacity: .64; filter: drop-shadow(0 0 5px #71e3e655); }
++.orbit-instrument { fill: none; stroke: #83c8d1; stroke-width: 3; stroke-opacity: .37; stroke-dasharray: 2 6 18 6; }
++.orbit-sweep {
++  fill: none; stroke: #99f7ef; stroke-width: 2; stroke-dasharray: 9 91; stroke-linecap: round;
++  filter: drop-shadow(0 0 4px #62f3e8a6);
++  animation: orbit-drift 14s linear infinite;
++}
++.command-console.is-paused .orbit-sweep { animation-play-state: paused; }
+ .graph-link {
+   fill: none; stroke: var(--command-cyan); stroke-width: 1; stroke-opacity: .18;
+   vector-effect: non-scaling-stroke; transition: stroke .2s, stroke-opacity .2s, stroke-width .2s;
+ }
+ .graph-link.is-outer { stroke-opacity: .1; }
+ .graph-link.is-recorded { stroke: var(--command-amber); stroke-opacity: .35; }
+-.graph-link.is-hovered, .graph-link.is-selected { stroke: var(--command-cyan); stroke-opacity: .82; stroke-width: 1.5; }
++.graph-link.is-hovered, .graph-link.is-selected { stroke: var(--command-cyan); stroke-opacity: .9; stroke-width: 1.7; filter: drop-shadow(0 0 4px #46cfc88a); }
+ .graph-link.is-recorded.is-selected { stroke: var(--command-amber); stroke-opacity: .9; }
+-.graph-link.is-pulsing { stroke: var(--command-amber); stroke-width: 2.2; stroke-dasharray: 5 9; animation: link-pulse .8s ease 1; }
++.graph-link.is-pulsing { stroke: var(--command-amber); stroke-width: 3; stroke-dasharray: .15 .85; filter: drop-shadow(0 0 5px #ffbb6b); animation: link-pulse .8s ease-out 1; }
+ 
+ .graph-nodes { position: absolute; inset: 0; pointer-events: none; }
+ .graph-node {
+@@ -219,7 +230,7 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .node-corners i:nth-child(4) { right: 0; bottom: 0; border-width: 0 1px 1px 0; }
+ .node-label {
+   position: absolute; left: calc(50% + 13px); top: 50%; transform: translateY(-50%);
+-  color: var(--command-muted); font-size: 11px; line-height: 1.25; white-space: nowrap; pointer-events: none;
++  color: #b5c5d4; font-size: 11px; line-height: 1.25; white-space: nowrap; pointer-events: none;
+   text-shadow: 0 1px 5px rgba(7, 17, 31, .95);
+ }
+ .node-label::before {
+@@ -238,7 +249,7 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-node.core { color: var(--command-cyan); z-index: 4; }
+ .graph-node.core .node-dot { width: 13px; height: 13px; background: var(--command-cyan); box-shadow: 0 0 0 5px rgba(55, 217, 232, .08), 0 0 22px rgba(55, 217, 232, .34); }
+ .graph-node.core .node-label { font-size: 15px; font-weight: 800; letter-spacing: .08em; }
+-.graph-node.peripheral { opacity: .42; }
++.graph-node.peripheral { opacity: .65; }
+ .graph-node.peripheral:hover { opacity: .72; }
+ .graph-node[data-recorded="true"] { color: var(--command-amber); }
+ .graph-node[data-recorded="true"] .node-dot { background: var(--command-amber); box-shadow: 0 0 0 3px rgba(7, 17, 31, .8), 0 0 14px rgba(242, 179, 93, .34); }
+@@ -247,6 +258,8 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-node:hover .node-corners, .graph-node[aria-pressed="true"] .node-corners { opacity: 1; }
+ .graph-node[aria-pressed="true"] .node-label { color: var(--command-text); }
+ .graph-node[data-recorded="true"][aria-pressed="true"] .node-label { color: var(--command-amber); }
++.graph-node.core[data-recorded="true"] .node-dot { background: var(--command-cyan); box-shadow: 0 0 0 5px #37d9e82b, 0 0 22px #37d9e85c; }
++.graph-node.core[data-recorded="true"][aria-pressed="true"] .node-label { color: var(--command-cyan); }
+ .graph-node.record-flash .node-marker { animation: node-record .8s ease 1; }
+ .graph-node.record-flash .node-dot { background: var(--command-amber); }
+ 
+@@ -266,14 +279,32 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-reticle > i:nth-of-type(2) { right: 0; top: 0; border-width: 1px 1px 0 0; }
+ .graph-reticle > i:nth-of-type(3) { left: 0; bottom: 0; border-width: 0 0 1px 1px; }
+ .graph-reticle > i:nth-of-type(4) { right: 0; bottom: 0; border-width: 0 1px 1px 0; }
++.graph-reticle.is-locked { filter: drop-shadow(0 0 5px #37d9e840); animation: reticle-lock .28s ease-out; }
++@keyframes reticle-lock {
++  from { transform: translate(-50%, -50%) scale(1.38); opacity: .4; }
++  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
++}
++
++.map-legend {
++  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; min-height: 31px;
++  border-top: 1px solid var(--command-border); padding: 3px 13px; color: #a0b4c7; background: #0b1726;
++  font-size: 10px;
++}
++.map-legend span { display: inline-flex; align-items: center; gap: 6px; }
++.map-legend span:last-child { margin-left: auto; }
++.map-legend i { width: 6px; height: 6px; border: 1px solid #9ab6c9; border-radius: 100%; }
++.map-legend span:nth-child(2) i { border-color: var(--command-amber); background: var(--command-amber); }
+ 
+ .mobile-node-bar { display: none; }
+ .mobile-node-list { display: none; }
+-.node-detail { padding: 13px 15px 15px; }
++.node-detail { padding: 15px; border-inline-start: 2px solid #5badb8; }
++.node-detail[data-recorded="true"] { border-inline-start-color: var(--command-amber); }
+ .node-detail-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+-.node-detail h4 { margin: 0; color: var(--command-text); font-size: 14px; }
+-.node-detail p { margin: 4px 0 0; color: var(--command-muted); font-size: 10.5px; line-height: 1.6; }
++.node-detail h4 { margin: 0; color: var(--command-text); font-size: 19px; }
++.node-detail p { margin: 4px 0 0; color: var(--command-muted); font-size: 12px; line-height: 1.6; }
+ .node-detail .detail-count { flex: 0 0 auto; color: var(--command-amber); font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
++.node-latest { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--command-border); font-size: 11px; color: #adc2ce; }
++.node-latest strong { color: #e2ecf2; font-weight: 600; }
+ .node-train {
+   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+   min-height: 44px; margin-top: 10px; padding: 0 12px;
+@@ -312,8 +343,8 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .log-row.transfer .log-dot { background: var(--command-green); }
+ .log-row.ai .log-dot { background: var(--command-purple); }
+ .log-main { min-width: 0; }
+-.log-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--command-text); font-size: 11px; }
+-.log-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8296ad; font-size: 8.5px; }
++.log-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--command-text); font-size: 12px; }
++.log-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aafbe; font-size: 10px; }
+ .log-time { color: #8296ad; font: 9px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+ .log-row.record-flash { animation: row-record .8s ease 1; }
+ 
+@@ -327,7 +358,7 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ @keyframes node-in { from { opacity: 0; filter: blur(3px); } to { opacity: 1; filter: blur(0); } }
+ @keyframes link-in { from { stroke-dashoffset: 1; opacity: 0; } to { stroke-dashoffset: 0; opacity: 1; } }
+ @keyframes orbit-drift { to { transform: rotate(360deg); } }
+-@keyframes link-pulse { 0% { stroke-dashoffset: 0; opacity: .25; } 40% { opacity: 1; } 100% { stroke-dashoffset: -42; opacity: .25; } }
++@keyframes link-pulse { 0% { stroke-dashoffset: 0; opacity: .25; } 18% { opacity: 1; } 100% { stroke-dashoffset: -.85; opacity: .45; } }
+ @keyframes node-record {
+   0%, 100% { filter: none; transform: translate(-50%, -50%) scale(1); }
+   35% { filter: drop-shadow(0 0 10px rgba(242, 179, 93, .8)); transform: translate(-50%, -50%) scale(1.28); }
+@@ -363,17 +394,16 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   body[data-view="command"] .command-return svg { width: 14px; height: 14px; }
+   body[data-view="command"] .wrap { padding-inline: 10px; }
+ 
+-  .command-console { border-radius: 8px; }
+-  .command-toolbar { flex-direction: column; align-items: stretch; gap: 9px; padding: 11px 12px 12px; }
+-  .command-context p { display: none; }
+-  .command-action { flex-direction: column; align-items: stretch; gap: 8px; }
+-  .command-action-copy { text-align: left; }
+-  .command-action-copy span { white-space: normal; }
++  .command-toolbar { gap: 8px; padding: 9px 10px; }
++  .command-context { padding-left: 7px; }
++  .command-context h2 { font-size: clamp(17px, 5.3vw, 22px); }
++  .command-action-copy { display: none; }
++  .command-primary { padding-inline: 9px; }
+   .command-primary { width: 100%; }
+   .command-grid { display: flex; flex-direction: column; }
+-  .command-graph-panel { order: 1; }
+-  .command-side { order: 2; border-left: 0; border-top: 1px solid var(--command-border); }
+-  .command-performance { order: 3; border-top: 1px solid var(--command-border); }
++  .command-graph-panel { order: 1; width: 100%; }
++  .command-performance { order: 2; width: 100%; border-top: 1px solid var(--command-border); }
++  .command-side { order: 3; border-left: 0; border-top: 1px solid var(--command-border); }
+   .command-graph-panel { border-bottom: 0; }
+   .command-performance { border-right: 0; }
+   .command-side { width: 100%; }
+diff --git a/web/command.js b/web/command.js
+--- a/web/command.js
++++ b/web/command.js
+@@ -3,7 +3,8 @@ import { escapeHtml } from './markdown.js';
+ import { __labState, openReadingLab } from './lab.js';
+ import { currentTab, openEstimator, returnToLearning } from './shell.js';
+ import { groupErrorRecords, historyStorageStatus, listHistory, summarizeHistory } from './command-history.js';
+-import { GRAPH_NODES, initCommandGraph } from './command-graph.js';
++import { GRAPH_NODES, graphNodeLabel, initCommandGraph } from './command-graph.js';
++import { renderCommandRadar } from './command-radar.js';
+ 
+ const $ = id => document.getElementById(id);
+ const selected = { node: 'reading' };
+@@ -11,7 +12,6 @@ let records = [];
+ let expandedLogs = false;
+ let baselineReady = false;
+ let seenKeys = new Set();
+-let feedbackPending = null;
+ 
+ const graph = initCommandGraph({ onSelect: nodeId => selectNode(nodeId) });
+ 
+@@ -49,30 +49,35 @@ function countFor(nodeId) {
+ 
+ function renderNodeDetail() {
+   const node = GRAPH_NODES.find(item => item.id === selected.node) || GRAPH_NODES[0];
+-  const label = ERROR_LABELS[node.id] || node.id;
++  const label = graphNodeLabel(node.id);
+   const group = groupErrorRecords(records.filter(record => record.firstAnswer.judgeable && record.kind === 'main'))
+     .find(item => item.errorType === node.id);
+   const count = group?.count || countFor(node.id);
++  const latest = node.core ? null : records.find(record => record.kind === 'main' && record.errorType === node.id && record.firstAnswer.judgeable);
+   let description = '选择一个节点，查看对应错因和训练入口。';
+   let action = '<button type="button" class="node-train" data-action="continue">开始阅读练习</button>';
+   if (node.peripheral) {
+-    description = '该模块暂不纳入阅读错因图谱，可前往参考估分查看现有能力。';
++    description = '在参考估分中查看。';
+     action = '<button type="button" class="node-train" data-action="estimator">前往参考估分</button>';
+   } else if (hasActiveAttempt()) {
+-    description = `当前练习：${__labState.material.title}。草稿与阶段会完整保留。`;
+-    action = '<button type="button" class="node-train" data-action="continue">继续当前练习</button>';
++    description = __labState.material.title;
++    action = node.core ? '' : '<button type="button" class="node-train" data-action="continue">继续当前练习</button>';
+   } else if (node.id === 'reading') {
+     description = countFor('reading')
+-      ? `${countFor('reading')} 次主练习已公开诊断。选择一个琥珀节点，或继续下一篇。`
+-      : '还没有可核对的主练习。先做一篇，再从这里锁定真实错因。';
+-    action = '<button type="button" class="node-train" data-action="continue">开始阅读练习</button>';
++      ? `${countFor('reading')} 次可核对的主练习`
++      : '选一个错因，查看对应练习。';
++    action = '';
+   } else {
+     const preset = LAB_PRESETS.find(item => item.errorType === node.id);
+-    description = preset ? `对应训练：${preset.title}` : '题库暂无完全对应的预置题，可先浏览阅读练习。';
++    description = preset ? `对应练习：${preset.title}` : '查看题库中的阅读练习。';
+     action = `<button type="button" class="node-train" data-action="train"${preset ? ` data-preset="${preset.id}"` : ''}>${preset ? escapeHtml(preset.title) : '查看阅读练习'}</button>`;
+   }
+-  $('commandNodeDetail').innerHTML = `<div class="node-detail-top"><div><h4>${escapeHtml(label)}</h4><p>${escapeHtml(description)}</p></div>
+-    <span class="detail-count">${node.peripheral ? '外围' : count ? `${count} 次` : '暂无记录'}</span></div>${action}`;
++  const detail = $('commandNodeDetail');
++  detail.dataset.recorded = String(Boolean(latest));
++  const evidenceStatus = latest?.evidence.judgeable ? (latest.evidence.aligned ? '依据已对齐' : '依据需核对') : '依据待确认';
++  detail.innerHTML = `<div class="node-detail-top"><div><h4>${escapeHtml(label)}</h4><p>${escapeHtml(description)}</p></div>
++    <span class="detail-count">${node.peripheral ? '外围' : count ? `${count} 次` : '暂无记录'}</span></div>
++    ${latest ? `<div class="node-latest"><span>最近一次</span><strong>${evidenceStatus}</strong></div>` : ''}${action}`;
+ }
+ 
+ function selectNode(nodeId) {
+@@ -127,15 +132,14 @@ function renderLogs() {
+ 
+ function renderContinue() {
+   const active = hasActiveAttempt();
+-  $('commandContinueTitle').textContent = active ? '当前练习尚未结束' : '开始阅读练习';
+-  $('commandContinueText').textContent = active
+-    ? `${__labState.material.title} · 草稿与当前阶段会完整保留。`
+-    : '从真实题库中选择一篇，验证你的原文依据。';
++  $('commandContinueText').textContent = active ? __labState.material.title : '';
+   $('commandContinueLabel').textContent = active ? '继续当前练习' : '开始阅读练习';
+ }
+ 
+ function flashRecord(record) {
+   graph.pulse(record);
++  const panel = record.kind === 'main' ? $('commandNodeDetail') : $('commandRadar');
++  panel.classList.add('record-flash');
+   const logRow = [...$('commandLogs').querySelectorAll('.log-row')]
+     .find(row => row.dataset.recordKey === record.key);
+   logRow?.classList.add('record-flash');
+@@ -146,6 +150,7 @@ function flashRecord(record) {
+   const metric = record.kind === 'transfer' ? $('commandMetrics').children[3] : null;
+   metric?.classList.add('record-flash');
+   setTimeout(() => {
++    panel.classList.remove('record-flash');
+     logRow?.classList.remove('record-flash');
+     monitorRow?.classList.remove('record-flash');
+     metric?.classList.remove('record-flash');
+@@ -170,13 +175,14 @@ function refresh({ allowFeedback = false } = {}) {
+   const storage = historyStorageStatus();
+   $('commandStorageWarning').innerHTML = storage.unavailable ? '<p class="storage-warning" role="status">记录仅在本次打开期间可用</p>' : '';
+   renderMetrics(summarizeHistory(records));
++  renderCommandRadar($('commandRadar'), records);
+   renderNodeDetail();
+   renderMonitor(groups);
+   renderLogs();
+   renderContinue();
+   $('commandGraphStatus').textContent = localMain.length
+-    ? `本机已记录 ${localMain.length} 次可核对主练习`
+-    : '真实题库图谱 · 等待第一次练习';
++    ? `${localMain.length} 次本机主练习`
++    : `${LAB_PRESETS.length} 篇预置练习`;
+   graph.setData({ selected: selected.node, records });
+   if (feedback) requestAnimationFrame(() => flashRecord(feedback));
+ }
+diff --git a/web/command-graph.js b/web/command-graph.js
+--- a/web/command-graph.js
++++ b/web/command-graph.js
+@@ -18,9 +18,16 @@ export const GRAPH_NODES = [
+ ];
+ 
+ const MOBILE_IDS = new Set(GRAPH_NODES.filter(node => node.mobilePrimary).map(node => node.id));
++const MODULE_LABELS = { reading: '阅读', listening: '听力', writing: '写作', translation: '翻译' };
+ const FOCAL = 940;
++const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
++const compactLayout = matchMedia('(max-width: 767px)');
+ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+ 
++export function graphNodeLabel(id) {
++  return MODULE_LABELS[id] || ERROR_LABELS[id] || id;
++}
++
+ function countFor(nodeId, records) {
+   const main = records.filter(record => record.kind === 'main' && record.firstAnswer?.judgeable);
+   if (nodeId === 'reading') return main.length;
+@@ -54,7 +61,7 @@ function layoutNodes(width, height, compact) {
+   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+   for (const item of projected) {
+     const { node, point } = item;
+-    const label = ERROR_LABELS[node.id] || node.id;
++    const label = graphNodeLabel(node.id);
+     const count = countFor(node.id, state.records);
+     const labelSize = node.core ? 15 : (compact ? 10.5 : 11);
+     const labelW = textWidth(label, labelSize) + (count ? textWidth(` ${count}次记录`, 9) + 8 : 0);
+@@ -66,7 +73,7 @@ function layoutNodes(width, height, compact) {
+     minX = Math.min(minX, left); maxX = Math.max(maxX, right);
+     minY = Math.min(minY, point.y - 24); maxY = Math.max(maxY, bottom);
+   }
+-  const availableW = Math.max(120, width - 18);
++  const availableW = Math.max(120, width - (compact ? 40 : 18));
+   const availableH = Math.max(100, height - 16);
+   const scale = Math.min(availableW / (maxX - minX), availableH / (maxY - minY), compact ? 1.16 : 1.35);
+   const centerX = (minX + maxX) / 2;
+@@ -91,8 +98,6 @@ const state = {
+   pitch: 0,
+   hover: null,
+   positions: new Map(),
+-  width: 0,
+-  height: 0,
+   compact: false,
+   flash: null,
+ };
+@@ -105,10 +110,59 @@ let flashTimer = 0;
+ let mobileOpen = false;
+ let booted = false;
+ 
++function wireSphere(core, radius) {
++  const parallels = [-60, -30, 0, 30, 60].map(latitude => ({ latitude }));
++  const meridians = [0, 36, 72, 108, 144].map(longitude => ({ longitude }));
++  const paths = { near: '', far: '' };
++  for (const gridLine of [...parallels, ...meridians]) {
++    const points = Array.from({ length: 33 }, (_, index) => {
++      const turn = index / 32 * Math.PI * 2;
++      const latitude = gridLine.latitude === undefined ? turn : gridLine.latitude * Math.PI / 180;
++      const longitude = gridLine.longitude === undefined ? turn : gridLine.longitude * Math.PI / 180;
++      return project({
++        x: radius * Math.cos(latitude) * Math.cos(longitude),
++        y: radius * Math.sin(latitude),
++        z: radius * Math.cos(latitude) * Math.sin(longitude),
++      }, 24 + state.yaw, -18 + state.pitch);
++    });
++    let lastLayer = null;
++    const coord = p => `${(core.x + p.x).toFixed(1)} ${(core.y + p.y).toFixed(1)}`;
++    for (let index = 1; index < points.length; index++) {
++      const previous = points[index - 1];
++      const current = points[index];
++      const layer = previous.depth + current.depth > 2 ? 'near' : 'far';
++      if (layer !== lastLayer) paths[layer] += `M${coord(previous)}`;
++      paths[layer] += `L${coord(current)}`;
++      lastLayer = layer;
++    }
++  }
++  return `<path class="orbit-mesh-back" d="${paths.far}"/><path class="orbit-mesh-front" d="${paths.near}"/>`;
++}
++
++function projectionPlane(width, height, core, radius) {
++  const horizon = height * .51 + state.pitch * .85;
++  const vanishingX = width / 2 + state.yaw * 4;
++  const grid = [];
++  for (let index = -12; index <= 12; index++) {
++    const offset = index * width / 15;
++    grid.push(`M${(vanishingX + offset * .12).toFixed(1)} ${horizon}L${(vanishingX + offset).toFixed(1)} ${height}`);
++  }
++  for (let index = 0; index < 12; index++) {
++    const y = horizon + (height - horizon) * (index / 12) ** 1.9;
++    grid.push(`M0 ${y.toFixed(1)}H${width}`);
++  }
++  const baseY = core.y + radius * .8;
++  return `<path class="field-plane" d="${grid.join('')}"/>
++    <ellipse class="projection-base" cx="${core.x}" cy="${baseY}" rx="${radius * 1.4}" ry="${radius * .25}"/>
++    <ellipse class="projection-base-inner" cx="${core.x}" cy="${baseY}" rx="${radius * 1.15}" ry="${radius * .19}"/>`;
++}
++
+ function sceneryHtml(width, height, positions) {
+   const core = positions.get('reading') || { x: width / 2, y: height / 2 };
+   const rx = Math.max(80, Math.min(width * .38, 375));
+   const ry = Math.max(70, Math.min(height * .39, 190));
++  const radius = Math.min(width, height) * .25;
++  const ringCenter = `${core.x}px ${core.y}px`;
+   let ticks = '';
+   for (let index = 0; index < 28; index++) {
+     const angle = (Math.PI * 2 * index) / 28;
+@@ -127,21 +181,25 @@ function sceneryHtml(width, height, positions) {
+     const radius = index % 6 === 0 ? 1.25 : .75;
+     stars += `<circle class="orbit-star" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius}"/>`;
+   }
+-  return `<defs><radialGradient id="commandCoreGlow"><stop offset="0" stop-color="#37d9e8" stop-opacity=".16"/><stop offset="1" stop-color="#37d9e8" stop-opacity="0"/></radialGradient></defs>
++  return `<defs><radialGradient id="commandCoreGlow"><stop offset="0" stop-color="#1c94a5" stop-opacity=".34"/><stop offset="1" stop-color="#1c94a5" stop-opacity="0"/></radialGradient>
++    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#53bed1" stop-opacity=".06"/><stop offset="1" stop-color="#65b1d3" stop-opacity=".3"/></linearGradient></defs>
+     <g>
+-      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${Math.min(width, height) * .3}"/>
++      ${projectionPlane(width, height, core, radius)}
++      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.75}"/>
+       <ellipse class="orbit-ring" cx="${core.x}" cy="${core.y}" rx="${rx}" ry="${ry}"/>
+       <ellipse class="orbit-ring is-mid" cx="${core.x}" cy="${core.y}" rx="${rx * .72}" ry="${ry * .7}"/>
+-      <ellipse class="orbit-ring is-far" cx="${core.x}" cy="${core.y}" rx="${rx * .44}" ry="${ry * .42}"/>
++      <ellipse class="orbit-ring is-far" cx="${core.x}" cy="${core.y}" rx="${rx * .74}" ry="${ry * .22}" transform="rotate(-21 ${core.x} ${core.y})"/>
+       <path class="orbit-axis" d="M${core.x} ${Math.max(8, core.y - ry * 1.12)}V${Math.min(height - 8, core.y + ry * 1.12)}M${Math.max(8, core.x - rx * 1.08)} ${core.y}H${Math.min(width - 8, core.x + rx * 1.08)}"/>
++      <g class="orbit-mesh">${wireSphere(core, radius)}</g>
++      <circle class="orbit-instrument" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}"/>
++      <circle class="orbit-sweep" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}" pathLength="100" style="transform-origin:${ringCenter}"/>
+       ${ticks}
+       ${stars}
+-      <g class="idle-orbiter" style="transform-origin:${core.x}px ${core.y}px"><circle cx="${core.x + rx * .72}" cy="${core.y}" r="1.6"/></g>
+     </g>`;
+ }
+ 
+ function nodeHtml(node, position, index) {
+-  const label = ERROR_LABELS[node.id] || node.id;
++  const label = graphNodeLabel(node.id);
+   const count = countFor(node.id, state.records);
+   const classes = ['graph-node'];
+   if (node.core) classes.push('core');
+@@ -178,7 +236,7 @@ function linkHtml(position, core) {
+ }
+ 
+ function mobileRowHtml(node) {
+-  const label = ERROR_LABELS[node.id] || node.id;
++  const label = graphNodeLabel(node.id);
+   const count = countFor(node.id, state.records);
+   return `<button type="button" class="mobile-node-row" data-node="${node.id}"
+     data-recorded="${count > 0}" aria-pressed="${state.selected === node.id}">
+@@ -194,13 +252,14 @@ function updateMobileList() {
+   refs.allNodeCount.textContent = String(GRAPH_NODES.length);
+ }
+ 
+-function renderGraph() {
++function renderGraph({ updateList = true } = {}) {
+   if (!refs) return;
+   const rect = refs.viewport.getBoundingClientRect();
+   if (rect.width < 80 || rect.height < 80) return;
+-  state.width = rect.width;
+-  state.height = rect.height;
+-  state.compact = rect.width < 768;
++  const active = document.activeElement;
++  const focusId = active?.dataset.node;
++  const focusList = [refs.nodes, refs.mobileList].find(list => list.contains(active));
++  state.compact = compactLayout.matches;
+   state.positions = layoutNodes(rect.width, rect.height, state.compact);
+   const core = state.positions.get('reading');
+   refs.orbit.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+@@ -221,9 +280,13 @@ function renderGraph() {
+   const shiftX = focus ? rect.width / 2 - focus.x : 0;
+   const shiftY = focus ? rect.height / 2 - focus.y : 0;
+   refs.stage.style.transform = `translate3d(${shiftX.toFixed(2)}px, ${shiftY.toFixed(2)}px, 0)`;
+-  updateMobileList();
++  if (updateList) updateMobileList();
+   updateReticle();
+   bindNodeHover();
++  if (focusList && focusId) {
++    const button = focusList.querySelector('[data-node="' + CSS.escape(focusId) + '"]');
++    if (button?.getClientRects().length) button.focus({ preventScroll: true });
++  }
+ }
+ 
+ function bindNodeHover() {
+@@ -245,7 +308,7 @@ function updateReticle() {
+   refs.reticle.style.left = `${position.x.toFixed(2)}px`;
+   refs.reticle.style.top = `${position.y.toFixed(2)}px`;
+   refs.reticle.classList.add('is-visible');
+-  refs.reticle.classList.toggle('is-locked', !state.hover);
++  refs.reticle.classList.toggle('is-locked', !state.hover || state.hover === state.selected);
+ }
+ 
+ function setHovered(nodeId) {
+@@ -274,7 +337,7 @@ function beginRelease(velocityYaw, velocityPitch) {
+     const ease = 1 - (1 - progress) ** 3;
+     state.yaw = startYaw + (endYaw - startYaw) * ease;
+     state.pitch = startPitch + (endPitch - startPitch) * ease;
+-    renderGraph();
++    renderGraph({ updateList: false });
+     if (progress < 1) release = { frame: requestAnimationFrame(step) };
+     else {
+       release = null;
+@@ -288,7 +351,7 @@ function scheduleRender() {
+   if (frame) return;
+   frame = requestAnimationFrame(() => {
+     frame = 0;
+-    renderGraph();
++    renderGraph({ updateList: false });
+   });
+ }
+ 
+@@ -402,7 +465,8 @@ export function initCommandGraph({ onSelect: selectCallback }) {
+     const velocityYaw = drag.vy || 0;
+     const velocityPitch = drag.vx || 0;
+     drag = null;
+-    beginRelease(velocityYaw, velocityPitch);
++    if (reducedMotion.matches) refs.viewport.classList.remove('dragging');
++    else beginRelease(velocityYaw, velocityPitch);
+   };
+   refs.viewport.addEventListener('pointerup', endDrag);
+   refs.viewport.addEventListener('pointercancel', endDrag);
+diff --git a/web/command-radar.js b/web/command-radar.js
+new file mode 100644
+--- /dev/null
++++ b/web/command-radar.js
+@@ -0,0 +1,84 @@
++const AXES = [
++  { key: 'first', label: '首答', title: '首答正确', kind: 'main', field: 'firstAnswer', success: 'correct', x: 50, y: 9 },
++  { key: 'evidence', label: '依据', title: '首答依据对齐', kind: 'main', field: 'evidence', success: 'aligned', x: 87, y: 38 },
++  { key: 'retry', label: '重答', title: '重答纠错', kind: 'main', field: 'reanswer', success: 'correct', x: 73, y: 83 },
++  { key: 'transfer', label: '同类答题', title: '同类题答对', kind: 'transfer', field: 'firstAnswer', success: 'correct', x: 27, y: 83 },
++  { key: 'transfer-evidence', label: '同类依据', title: '同类题依据对齐', kind: 'transfer', field: 'evidence', success: 'aligned', x: 13, y: 38 },
++];
++
++const CENTER = { x: 150, y: 128 };
++const RADIUS = 88;
++
++function position(index, ratio) {
++  const angle = index * Math.PI * 2 / AXES.length - Math.PI / 2;
++  return [CENTER.x + Math.cos(angle) * RADIUS * ratio, CENTER.y + Math.sin(angle) * RADIUS * ratio];
++}
++
++const point = ([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`;
++
++function measure(records, axis) {
++  const samples = records.filter(record => record.kind === axis.kind && record[axis.field]?.judgeable);
++  const hits = samples.filter(record => record[axis.field][axis.success] === true).length;
++  return { ...axis, hits, total: samples.length, ratio: samples.length ? hits / samples.length : null };
++}
++
++function radarPlot(readings) {
++  const rings = [.25, .5, .75, 1].map(scale =>
++    `<polygon class="radar-grid" points="${AXES.map((_, index) => point(position(index, scale))).join(' ')}"/>`,
++  ).join('');
++  const spokes = AXES.map((axis, index) => `<path class="radar-spoke" data-axis="${axis.key}" d="M${point([CENTER.x, CENTER.y])}L${point(position(index, 1))}"/>`).join('');
++  const measured = readings.map((axis, index) => axis.ratio === null ? null : point(position(index, axis.ratio)));
++  const complete = measured.every(Boolean);
++  const silhouette = complete ? `<polygon class="radar-shape" points="${measured.join(' ')}"/>` : '';
++  const edges = complete ? '' : measured.map((end, index) => {
++    const next = measured[(index + 1) % measured.length];
++    return end && next ? `<path class="radar-edge" d="M${end}L${next}"/>` : '';
++  }).join('');
++  const markers = readings.map((axis, index) => {
++    const [x, y] = position(index, axis.ratio ?? 1);
++    const className = axis.ratio === null ? 'radar-point is-pending' : 'radar-point is-measured';
++    return `<circle class="${className}" data-axis="${axis.key}" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="3.3"/>`;
++  }).join('');
++  return `<svg class="radar-plot" viewBox="0 0 300 247" aria-hidden="true">
++    <circle class="radar-dial" cx="150" cy="128" r="101"/>
++    ${rings}${spokes}${silhouette}${edges}${markers}
++  </svg>`;
++}
++
++function showAxis(host, readings, axisKey) {
++  const axis = readings.find(item => item.key === axisKey) || readings[0];
++  host.dataset.activeAxis = axis.key;
++  for (const control of host.querySelectorAll('.radar-axis')) {
++    control.setAttribute('aria-pressed', String(control.dataset.axis === axis.key));
++  }
++  for (const marker of host.querySelectorAll('.radar-point, .radar-spoke')) {
++    marker.classList.toggle('is-active', marker.dataset.axis === axis.key);
++  }
++  const fraction = axis.total ? `${axis.hits} / ${axis.total}` : '—';
++  host.querySelector('.radar-value').textContent = fraction;
++  host.querySelector('.radar-caption').textContent = axis.title;
++  host.querySelector('.radar-sample').textContent = axis.total ? `${axis.total} 次可判定` : '暂无样本';
++}
++
++export function renderCommandRadar(host, records) {
++  const active = host.contains(document.activeElement) && document.activeElement.dataset.axis;
++  const readings = AXES.map(axis => measure(records, axis));
++  host.innerHTML = `<div class="radar-board" role="group" aria-label="五项练习表现">
++    ${radarPlot(readings)}
++    ${readings.map(axis => {
++      const fraction = axis.total ? `${axis.hits}/${axis.total}` : '—';
++      const description = axis.total ? `${axis.hits} / ${axis.total}` : '暂无样本';
++      return `<button class="radar-axis" type="button" data-axis="${axis.key}" data-samples="${axis.total}" style="--axis-x:${axis.x}%;--axis-y:${axis.y}%" aria-label="${axis.title}，${description}">
++        <span>${axis.label}</span><b>${fraction}</b>
++      </button>`;
++    }).join('')}
++  </div><div class="radar-readout" aria-live="polite" aria-atomic="true">
++    <div><strong class="radar-caption"></strong><span class="radar-sample"></span></div><output class="radar-value"></output>
++  </div>`;
++  showAxis(host, readings, host.dataset.activeAxis);
++  if (active) host.querySelector(`[data-axis="${CSS.escape(active)}"].radar-axis`)?.focus({ preventScroll: true });
++  host.querySelector('.radar-board').addEventListener('click', event => {
++    const button = event.target.closest('.radar-axis');
++    if (button) showAxis(host, readings, button.dataset.axis);
++  });
++}
+diff --git a/web/command-radar.css b/web/command-radar.css
+new file mode 100644
+--- /dev/null
++++ b/web/command-radar.css
+@@ -0,0 +1,50 @@
++.command-radar { padding: 1px 14px 12px; }
++
++.radar-board {
++  position: relative;
++  width: 100%;
++  max-width: 365px;
++  margin-inline: auto;
++  aspect-ratio: 300 / 247;
++  isolation: isolate;
++  background: radial-gradient(ellipse at 50% 50%, #1a394877, transparent 67%);
++}
++
++.radar-plot { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
++.radar-dial, .radar-grid, .radar-spoke { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
++.radar-dial { stroke: #5790a43b; stroke-dasharray: 1 5; }
++.radar-grid { stroke: #5f91a440; }
++.radar-spoke { stroke: #42647b; }
++.radar-spoke.is-active { stroke: #7cdfdb; stroke-width: 1.5; }
++.radar-edge, .radar-shape { stroke: #a3f1e7; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
++.radar-edge { fill: none; }
++.radar-shape { fill: #40dcc725; filter: drop-shadow(0 0 6px #52dfd350); }
++.radar-point.is-pending { fill: #102132; stroke: #678895; stroke-width: 1.2; }
++.radar-point.is-measured { fill: #bdf8f0; stroke: #123745; stroke-width: 1.5; }
++.radar-point.is-active { stroke: #c6f9f2; stroke-width: 1.8; }
++
++.view-command .radar-axis {
++  position: absolute; z-index: 1; left: var(--axis-x); top: var(--axis-y);
++  display: grid; place-items: center; align-content: center; min-width: 44px; min-height: 44px;
++  transform: translate(-50%, -50%); padding: 3px 4px; border: 1px solid transparent;
++  border-radius: 3px; background: transparent; color: #c2d4de; cursor: pointer;
++  font-size: 11px; line-height: 1.22; white-space: nowrap;
++  transition: color .16s, background .16s, border-color .16s;
++}
++.radar-axis b { color: #a2d8d5; margin-top: 1px; font: 700 11px/1.15 ui-monospace, Consolas, monospace; }
++.radar-axis[data-samples="0"] b { color: #8598ad; }
++.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #ebfffd; border-color: #64b6b670; background: #122b3996; }
++.radar-readout {
++  display: flex; justify-content: space-between; align-items: center; gap: 8px;
++  padding: 10px 12px; min-height: 58px; border: 1px solid #395466;
++  border-left: 2px solid #7de2da; background: #091724;
++}
++.radar-readout > div { display: grid; gap: 2px; }
++.radar-caption { color: #e6f0f7; font-size: 12px; }
++.radar-sample { color: #a4b9c9; font-size: 10px; }
++.radar-value { color: #c7f6ed; font: 700 20px/1 ui-monospace, Consolas, monospace; white-space: nowrap; }
++
++@media (max-width: 767px) {
++  .command-radar { padding-inline: 12px; }
++  .radar-readout { max-width: 365px; margin-inline: auto; }
++}
+diff --git a/dev/accept-command.mjs b/dev/accept-command.mjs
+--- a/dev/accept-command.mjs
++++ b/dev/accept-command.mjs
+@@ -72,7 +72,7 @@ async function click(selector) {
+   await delay(50);
+ }
+ async function key(keyName, code, keyCode) {
+-  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, windowsVirtualKeyCode: keyCode });
++  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, windowsVirtualKeyCode: keyCode, ...(keyName === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) });
+   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code, windowsVirtualKeyCode: keyCode });
+   await delay(50);
+ }
+@@ -83,7 +83,8 @@ async function screenshot(name, fullPage = false) {
+   return path;
+ }
+ const historyCount = () => evaluate(`Object.keys(localStorage).filter(k => k.startsWith('cet.command.history.v1.')).length`);
+-const metrics = () => evaluate(`[...document.querySelectorAll('.metric')].map(el => el.innerText.replace(/\\s+/g,' ').trim())`);
++const metrics = () => evaluate(`[...document.querySelectorAll('.metric')].map(el => el.textContent.replace(/\\s+/g,' ').trim())`);
++const radarValues = () => evaluate(`[...document.querySelectorAll('#commandRadar .radar-axis b')].map(el => el.textContent)`);
+ 
+ try {
+   const endpoint = await new Promise((resolveEndpoint, reject) => {
+@@ -122,6 +123,8 @@ try {
+   check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(7, 17, 31)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(13, 25, 41)'`), 'command center uses dark mission surface');
+   check(await evaluate(`!document.querySelector('.tabnav').getClientRects().length && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'simple-mode tabs stay out of command center');
+   check((await metrics()).every(text => text.includes('—') && text.includes('待练习')), 'zero metrics show pending');
++  check(JSON.stringify(await radarValues()) === JSON.stringify(['—', '—', '—', '—', '—']) && await evaluate(`document.querySelectorAll('#commandRadar .radar-point.is-pending').length === 5 && !document.querySelector('#commandRadar .radar-shape')`), 'five radar axes distinguish missing samples');
++  check(await evaluate(`Boolean(document.querySelector('.field-plane') && document.querySelector('.orbit-mesh-front') && document.querySelector('.orbit-mesh-back'))`), 'field renders projection grid and distinct front and back meshes');
+   check(await evaluate(`document.getElementById('commandLogs').innerText.includes('暂无练习记录')`), 'empty log state');
+   check(await evaluate(`document.getElementById('commandMonitor').innerText.includes('完成一道阅读练习后')`), 'empty monitor state');
+   check(await evaluate(`document.querySelectorAll('#graphNodes .graph-node').length === 13`), 'real error graph nodes');
+@@ -174,6 +177,10 @@ try {
+     '同类题答对且依据对齐 — 待练习',
+   ]), 'main result metrics match acceptance path');
+   check(await evaluate(`document.querySelector('.monitor-count').textContent === '1' && document.querySelectorAll('.log-row').length === 1`), 'monitor and log update together');
++  check(JSON.stringify(await radarValues()) === JSON.stringify(['0/1', '1/1', '1/1', '—', '—']), 'main practice updates real radar axes including measured zero');
++  await evaluate(`document.querySelector('#commandRadar [data-axis=evidence].radar-axis').focus()`);
++  await key('Enter', 'Enter', 13);
++  check(await evaluate(`document.querySelector('#commandRadar [data-axis=evidence].radar-axis').getAttribute('aria-pressed') === 'true' && document.querySelector('#commandRadar .radar-caption').textContent === '首答依据对齐' && document.querySelector('#commandRadar .radar-value').textContent === '1 / 1'`), 'radar axis can be selected and inspected from the keyboard');
+   await delay(950);
+   await click('#commandReturn');
+   await click('#tab-command');
+@@ -214,6 +221,10 @@ try {
+   check(await historyCount() === 2, 'transfer adds one independent record');
+   await click('#tab-command');
+   check((await metrics())[3].includes('1/1'), 'transfer metric is 1/1');
++  check(JSON.stringify(await radarValues()) === JSON.stringify(['0/1', '1/1', '1/1', '1/1', '1/1']) && await evaluate(`Boolean(document.querySelector('#commandRadar .radar-shape'))`), 'transfer answer and evidence complete the measured radar');
++  await evaluate(`scrollTo({top:0,behavior:'instant'})`);
++  await delay(900);
++  const radarShot = await screenshot('command-radar.png');
+   check(await evaluate(`document.querySelector('.monitor-count').textContent === '1'`), 'transfer does not inflate main error count');
+   await click('#commandReturn');
+   await click('[data-act="summary"]');
+@@ -280,6 +291,10 @@ try {
+   check(JSON.stringify(mobileGraph.ids) === JSON.stringify(['attitude_shift','causal_inversion','reading','scope_expansion']) && mobileGraph.items.every(item => item.left >= mobileGraph.viewport.left - 1 && item.right <= mobileGraph.viewport.right + 1 && item.top >= mobileGraph.viewport.top - 1 && item.bottom <= mobileGraph.viewport.bottom + 1), '390 graph labels stay inside viewport', JSON.stringify(mobileGraph));
+   check(await evaluate(`document.getElementById('commandMobileNodes').hidden && document.getElementById('commandAllNodes').getAttribute('aria-expanded') === 'false'`), '390 extra causes start collapsed');
+   const mobileShot = await screenshot('command-mobile.png');
++  const mobileAxes = await evaluate(`[...document.querySelectorAll('#commandRadar .radar-axis')].map(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right}))`);
++  check(mobileAxes.length === 5 && mobileAxes.every(axis => axis.left >= 0 && axis.right <= 390), 'mobile radar keeps all five axes in view', JSON.stringify(mobileAxes));
++  await evaluate(`document.querySelector('#commandPerformanceTitle').scrollIntoView({block:'center',behavior:'instant'})`);
++  const mobileRadarShot = await screenshot('command-mobile-radar.png');
+   await click('#commandAllNodes');
+   const mobileHeights = await evaluate(`[...document.querySelectorAll('#commandMobileNodes .mobile-node-row')].map(el=>({text:el.innerText,h:el.getBoundingClientRect().height,display:getComputedStyle(el).display}))`);
+   check(await evaluate(`!document.getElementById('commandMobileNodes').hidden && document.getElementById('commandAllNodes').getAttribute('aria-expanded') === 'true' && document.querySelectorAll('#commandMobileNodes .mobile-node-row').length === 13`), '390 all-causes list expands');
+@@ -323,7 +338,7 @@ try {
+   await delay(350);
+   await evaluate(`document.querySelector('[data-node=causal_inversion]').focus()`);
+   await key('Enter', 'Enter', 13);
+-  check(await evaluate(`document.querySelector('[data-node=causal_inversion]').getAttribute('aria-pressed') === 'true'`), 'keyboard Enter selects graph node');
++  check(await evaluate(`document.querySelector('[data-node=causal_inversion]').getAttribute('aria-pressed') === 'true' && document.activeElement.dataset.node === 'causal_inversion'`), 'keyboard Enter selects graph node and preserves focus');
+   await click('#graphReset');
+   await delay(350);
+   const beforeDrag = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]')}; })()`);
+@@ -341,7 +356,7 @@ try {
+   const afterDrag = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]')}; })()`);
+   const nearMove = Math.hypot(afterDrag.near.x - beforeDrag.near.x, afterDrag.near.y - beforeDrag.near.y);
+   const farMove = Math.hypot(afterDrag.far.x - beforeDrag.far.x, afterDrag.far.y - beforeDrag.far.y);
+-  check(nearMove > farMove + 2, 'drag gives near and far nodes different motion', JSON.stringify({nearMove,farMove,beforeDrag,afterDrag}));
++  check(nearMove > 2 && farMove > 2 && Math.abs(nearMove - farMove) > 2, 'drag gives near and far nodes different motion', JSON.stringify({nearMove,farMove,beforeDrag,afterDrag}));
+   await click('#graphReset');
+   await delay(350);
+   const afterReset = await evaluate(`(() => { const p=s=>{const r=document.querySelector(s).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}; return {near:p('[data-node=attitude_shift]'),far:p('[data-node=causal_inversion]'),selected:document.querySelector('[data-node=reading]').getAttribute('aria-pressed'),transform:document.getElementById('graphStage').style.transform}; })()`);
+@@ -350,7 +365,7 @@ try {
+   check(await evaluate(`getComputedStyle(document.querySelector('.graph-node')).animationName === 'none' && getComputedStyle(document.querySelector('.graph-node')).transitionDuration === '0s'`), 'reduced motion removes graph animation');
+   check(exceptions.length === 0, 'no browser runtime exceptions', exceptions.join('; '));
+ 
+-  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, exceptions }, null, 2));
++  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, exceptions }, null, 2));
+ } finally {
+   ws?.close();
+   browser.kill();

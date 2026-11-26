@@ -1,0 +1,1128 @@
+diff --git a/cet-studyhack-command-edition/dev/accept-command.mjs b/cet-studyhack-command-edition/dev/accept-command.mjs
+index 4e0db2b..76d156d 100644
+--- a/cet-studyhack-command-edition/dev/accept-command.mjs
++++ b/cet-studyhack-command-edition/dev/accept-command.mjs
+@@ -120,8 +120,8 @@ try {
+   await navigate();
+ 
+   check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command'`), 'command center opens by default');
+-  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(7, 17, 31)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(13, 25, 41)'`), 'command center uses dark mission surface');
+-  check(await evaluate(`!document.querySelector('.tabnav').getClientRects().length && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'simple-mode tabs stay out of command center');
++  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(18, 21, 19)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(32, 35, 34)'`), 'command center uses dark graphite surfaces');
++  check(await evaluate(`document.querySelector('.tabnav').getClientRects().length > 0 && document.getElementById('tab-command').getAttribute('aria-selected') === 'true' && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'command center provides navigation to the other stations');
+   check((await metrics()).every(text => text.includes('—') && text.includes('待练习')), 'zero metrics show pending');
+   check(JSON.stringify(await radarValues()) === JSON.stringify(['—', '—', '—', '—', '—']) && await evaluate(`document.querySelectorAll('#commandRadar .radar-point.is-pending').length === 5 && !document.querySelector('#commandRadar .radar-shape')`), 'five radar axes distinguish missing samples');
+   check(await evaluate(`Boolean(document.querySelector('.field-plane') && document.querySelector('.orbit-mesh-front') && document.querySelector('.orbit-mesh-back'))`), 'field renders projection grid and distinct front and back meshes');
+@@ -143,15 +143,20 @@ try {
+   check(await evaluate(`document.getElementById('tab-reading').getClientRects().length > 0 && document.getElementById('tab-estimator').getClientRects().length > 0 && document.getElementById('tab-command').innerText.includes('返回作战中心')`), 'simple mode owns lab, estimator and command re-entry');
+   const simpleShot = await screenshot('simple-desktop.png');
+   await click('#tab-command');
+-  check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'simple mode returns to command center');
++  check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command'`), 'simple mode returns to command center');
+   await click('[data-node="scope_expansion"]');
+   check(await evaluate(`document.querySelector('#graphNodes [data-node=scope_expansion]').getAttribute('aria-pressed') === 'true'`), 'node selection works');
+   check(await evaluate(`document.getElementById('commandNodeDetail').innerText.includes('屏幕阅读真的更差吗？')`), 'preset mapping appears');
+   await click('#commandNodeDetail [data-action="train"]');
+-  check(await evaluate(`document.body.dataset.view === 'reading' && document.activeElement.dataset.id === 'screen-reading'`), 'training opens and focuses matching material');
++  check(await evaluate(`document.body.dataset.view === 'reading' && document.body.dataset.mode === 'command' && document.activeElement.dataset.id === 'screen-reading' && document.querySelectorAll('[data-instrument=evidence] .instrument-slab').length === 4`), 'training opens in the 3D workbench and focuses matching material');
+ 
+   await click('[data-key="A"]');
+   await click('[data-sid="s5"]');
++  await click('#commandReturn');
++  check(await evaluate(`document.body.dataset.mode === 'simple' && document.body.dataset.view === 'reading' && !document.querySelector('[data-instrument=evidence]').getClientRects().length && document.querySelector('[data-sid=s5]').getAttribute('aria-pressed') === 'true'`), 'simple mode preserves live evidence selection');
++  await click('#commandReturn');
++  check(await evaluate(`document.body.dataset.mode === 'command' && document.body.dataset.view === 'reading' && document.querySelector('[data-key=A]').getAttribute('aria-pressed') === 'true'`), 'returning to 3D keeps the selected answer');
++  const labShot = await screenshot('workbench-lab.png');
+   await click('[data-act="submit"]');
+   check(await evaluate(`JSON.parse(localStorage.getItem('cet.lab.v1')).screen === 'hint'`), 'first answer reaches hint');
+   check(await historyCount() === 0, 'hint does not record history');
+@@ -225,6 +230,15 @@ try {
+   await evaluate(`scrollTo({top:0,behavior:'instant'})`);
+   await delay(900);
+   const radarShot = await screenshot('command-radar.png');
++  const deckTop = () => evaluate(`document.querySelector('.deck-glass .deck-top').getBoundingClientRect().top`);
++  const assembled = await deckTop();
++  await click('#graphLayers');
++  await delay(410);
++  check(await evaluate(`document.querySelectorAll('.machine-deck').length === 4 && document.getElementById('graphLayers').getAttribute('aria-pressed') === 'true'`) && (await deckTop()) < assembled - 25, 'the section view lifts the upper decks');
++  await evaluate(`scrollTo({top:0,behavior:'instant'})`);
++  const layersShot = await screenshot('command-layers.png');
++  await click('#graphReset');
++  check(Math.abs((await deckTop()) - assembled) < 2 && await evaluate(`document.getElementById('graphLayers').getAttribute('aria-pressed') === 'false'`), 'reset restores the assembled deck');
+   check(await evaluate(`document.querySelector('.monitor-count').textContent === '1'`), 'transfer does not inflate main error count');
+   await click('#commandReturn');
+   await click('[data-act="summary"]');
+@@ -253,6 +267,26 @@ try {
+   await click('#tab-command');
+   await click('#commandReturn');
+   check(await evaluate(`document.body.dataset.view === 'reading' && !document.getElementById('toolPanel').hidden && document.getElementById('toolInput').value === 'Keep this reading draft.'`), 'reading tool return preserves panel and input');
++  await click('#commandReturn');
++  check(await evaluate(`document.body.dataset.mode === 'command' && document.querySelector('[data-instrument=optics]').getClientRects().length > 0 && document.getElementById('toolInput').value === 'Keep this reading draft.'`), 'reading tools enter 3D without replacing the draft');
++  if (process.env.CET_TEST_FIXTURES === '1') {
++    await click('#toolSampleBtn');
++    for (const [button, section] of [['Trans', 'translation'], ['Vocab', 'vocab'], ['Grammar', 'grammar']]) {
++      await click(`#tool${button}Btn`);
++      await waitFor(`document.getElementById('tool-status-${section}').dataset.state === 'done'`, `reading tools fixture for ${section}`);
++      check(await evaluate(`document.getElementById('tool-sec-${section}').classList.contains('show')`), `${section} opens its 3D output panel`);
++    }
++    check(await evaluate(`!document.getElementById('toolExportBtn').disabled`), '3D vocabulary output retains dictation export');
++    await evaluate(`scrollTo({top:0,behavior:'instant'})`);
++  }
++  const toolShot = await screenshot('workbench-tools.png');
++  await click('#tab-estimator');
++  await click('#est-estimateBtn');
++  await waitFor(`document.getElementById('est-overviewCard').classList.contains('show')`, 'estimate result');
++  check(await evaluate(`document.body.dataset.mode === 'command' && parseFloat(document.getElementById('est-scoreDial').style.getPropertyValue('--score-angle')) > 0 && document.querySelectorAll('#est-moduleList .module').length === 4`), '3D result uses calculated score and four true module results');
++  await evaluate(`window.scrollTo({top:0,behavior:'instant'})`);
++  await delay(400);
++  const estimatorShot = await screenshot('workbench-estimator.png');
+ 
+   await click('#tab-command');
+   await evaluate(`(() => { const saved = JSON.parse(localStorage.getItem('cet.lab.v1')); delete saved.attemptId; localStorage.setItem('cet.lab.v1', JSON.stringify(saved)); })()`);
+@@ -291,6 +325,7 @@ try {
+   check(JSON.stringify(mobileGraph.ids) === JSON.stringify(['attitude_shift','causal_inversion','reading','scope_expansion']) && mobileGraph.items.every(item => item.left >= mobileGraph.viewport.left - 1 && item.right <= mobileGraph.viewport.right + 1 && item.top >= mobileGraph.viewport.top - 1 && item.bottom <= mobileGraph.viewport.bottom + 1), '390 graph labels stay inside viewport', JSON.stringify(mobileGraph));
+   check(await evaluate(`document.getElementById('commandMobileNodes').hidden && document.getElementById('commandAllNodes').getAttribute('aria-expanded') === 'false'`), '390 extra causes start collapsed');
+   const mobileShot = await screenshot('command-mobile.png');
++  check(await evaluate(`(() => { const deck = document.querySelector('.deck-base').getBoundingClientRect(), frame = document.querySelector('.graph-viewport').getBoundingClientRect(); return deck.left >= frame.left && deck.right <= frame.right && deck.bottom <= frame.bottom; })()`), 'the full 3D base fits a compact viewport');
+   const mobileAxes = await evaluate(`[...document.querySelectorAll('#commandRadar .radar-axis')].map(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right}))`);
+   check(mobileAxes.length === 5 && mobileAxes.every(axis => axis.left >= 0 && axis.right <= 390), 'mobile radar keeps all five axes in view', JSON.stringify(mobileAxes));
+   await evaluate(`document.querySelector('#commandPerformanceTitle').scrollIntoView({block:'center',behavior:'instant'})`);
+@@ -306,17 +341,21 @@ try {
+   check(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), '320px has no page horizontal overflow');
+   const narrowButtons = await evaluate(`[...document.querySelectorAll('.mobile-node-row, .mobile-node-bar button, .graph-controls button, #commandReturn, #commandContinue, .node-train, .monitor-row, #commandShowAll')].filter(el => el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return {text:el.innerText,left:r.left,right:r.right};})`);
+   check(narrowButtons.every(rect => rect.left >= -1 && rect.right <= 321), '320px visible controls stay within page', JSON.stringify(narrowButtons.filter(rect => rect.left < -1 || rect.right > 321)));
++  await click('#tab-reading');
++  await click('#subtab-lab');
++  check(await evaluate(`document.body.dataset.mode === 'command' && document.documentElement.scrollWidth <= innerWidth && document.querySelector('.stage-assembly').getClientRects().length > 0`), '320px 3D evidence workbench fits the screen');
++  await click('#tab-command');
+ 
+   await setViewport(1366, 768);
+   await evaluate('scrollTo(0,0)');
+-  check(await evaluate(`document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'wide command center keeps simple tabs hidden');
++  check(await evaluate(`document.body.dataset.mode === 'command' && getComputedStyle(document.querySelector('.tabnav')).position === 'fixed'`), 'wide command center keeps navigation in the header');
+   await click('#commandReturn');
+   check(await evaluate(`document.body.dataset.mode === 'simple' && document.querySelector('.tabnav').getClientRects().length > 0`), 'wide return reveals simple mode');
+   await evaluate(`document.getElementById('tab-command').focus()`);
+   await key('ArrowRight', 'ArrowRight', 39);
+   check(await evaluate(`document.body.dataset.view === 'reading' && document.activeElement.id === 'tab-reading'`), 'tab arrow key wraps and moves focus');
+   await click('#tab-command');
+-  check(await evaluate(`document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'command tab returns from simple mode');
++  check(await evaluate(`document.body.dataset.mode === 'command' && document.body.dataset.view === 'command'`), 'command tab returns from simple mode');
+   await click('#graphZoomIn');
+   check(await evaluate(`document.getElementById('graphStage').style.getPropertyValue('--graph-zoom') === '1.1'`), 'graph zoom control works');
+   await click('#graphReset');
+@@ -365,7 +404,7 @@ try {
+   check(await evaluate(`getComputedStyle(document.querySelector('.graph-node')).animationName === 'none' && getComputedStyle(document.querySelector('.graph-node')).transitionDuration === '0s'`), 'reduced motion removes graph animation');
+   check(exceptions.length === 0, 'no browser runtime exceptions', exceptions.join('; '));
+ 
+-  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, exceptions }, null, 2));
++  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, layersShot, labShot, toolShot, estimatorShot, exceptions }, null, 2));
+ } finally {
+   ws?.close();
+   browser.kill();
+diff --git a/cet-studyhack-command-edition/web/app.js b/cet-studyhack-command-edition/web/app.js
+index 360cc68..97eec9e 100644
+--- a/cet-studyhack-command-edition/web/app.js
++++ b/cet-studyhack-command-edition/web/app.js
+@@ -7,6 +7,8 @@ import './lab.js';
+ import './reading.js';
+ import './estimator.js';
+ import { initCommandCenter } from './command.js';
++import { initWorkbench } from './workbench.js';
+ 
+ initShell();
+-initCommandCenter();
+\ No newline at end of file
++initCommandCenter();
++initWorkbench();
+diff --git a/cet-studyhack-command-edition/web/command-graph.js b/cet-studyhack-command-edition/web/command-graph.js
+index 9131d63..1144ca7 100644
+--- a/cet-studyhack-command-edition/web/command-graph.js
++++ b/cet-studyhack-command-edition/web/command-graph.js
+@@ -81,7 +81,7 @@ function layoutNodes(width, height, compact) {
+   const positions = new Map();
+   for (const item of projected) {
+     const x = width / 2 + (item.point.x - centerX) * scale * state.zoom;
+-    const y = height / 2 + (item.point.y - centerY) * scale * state.zoom;
++    const y = height * (compact ? .45 : .5) + (item.point.y - centerY) * scale * state.zoom;
+     positions.set(item.node.id, {
+       x, y, side: item.side, item: item.node,
+       depthScale: clamp(item.point.depth, .84, 1.12),
+@@ -100,6 +100,7 @@ const state = {
+   positions: new Map(),
+   compact: false,
+   flash: null,
++  layerSpread: 0,
+ };
+ let refs = null;
+ let onSelect = () => {};
+@@ -109,6 +110,14 @@ let frame = 0;
+ let flashTimer = 0;
+ let mobileOpen = false;
+ let booted = false;
++let layerFrame = 0;
++
++const DECKS = [
++  { size: 1.94, level: 1.32, thickness: .18, finish: 'base' },
++  { size: 1.75, level: 1.17, thickness: .11, finish: 'band' },
++  { size: 1.59, level: 1.00, thickness: .12, finish: 'steel' },
++  { size: 1.38, level: .83, thickness: .13, finish: 'glass' },
++];
+ 
+ function wireSphere(core, radius) {
+   const parallels = [-60, -30, 0, 30, 60].map(latitude => ({ latitude }));
+@@ -139,7 +148,7 @@ function wireSphere(core, radius) {
+   return `<path class="orbit-mesh-back" d="${paths.far}"/><path class="orbit-mesh-front" d="${paths.near}"/>`;
+ }
+ 
+-function projectionPlane(width, height, core, radius) {
++function projectionPlane(width, height) {
+   const horizon = height * .51 + state.pitch * .85;
+   const vanishingX = width / 2 + state.yaw * 4;
+   const grid = [];
+@@ -151,17 +160,60 @@ function projectionPlane(width, height, core, radius) {
+     const y = horizon + (height - horizon) * (index / 12) ** 1.9;
+     grid.push(`M0 ${y.toFixed(1)}H${width}`);
+   }
+-  const baseY = core.y + radius * .8;
+-  return `<path class="field-plane" d="${grid.join('')}"/>
+-    <ellipse class="projection-base" cx="${core.x}" cy="${baseY}" rx="${radius * 1.4}" ry="${radius * .25}"/>
+-    <ellipse class="projection-base-inner" cx="${core.x}" cy="${baseY}" rx="${radius * 1.15}" ry="${radius * .19}"/>`;
++  return `<path class="field-plane" d="${grid.join('')}"/>`;
++}
++
++function machinePoint(core, x, y, z) {
++  const view = project({ x, y, z }, 12 + state.yaw, -29 + state.pitch);
++  return { x: core.x + view.x, y: core.y + view.y, depth: view.depth };
++}
++
++const coordinates = points => points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
++
++function machineDeck(core, radius, deck, index) {
++  const level = radius * (deck.level - state.layerSpread * index * .205);
++  const span = radius * deck.size;
++  const contour = Array.from({ length: 8 }, (_, side) => {
++    const angle = (side + .5) * Math.PI / 4;
++    return { x: Math.cos(angle) * span, z: Math.sin(angle) * span * .78 };
++  });
++  const ring = (height, scale = 1) => contour.map(({ x, z }) => machinePoint(core, x * scale, height, z * scale));
++  const top = ring(level);
++  const bottom = ring(level + radius * deck.thickness);
++  const faceDepth = machinePoint(core, 0, level, 0).depth;
++  const walls = top.flatMap((corner, side) => {
++    const next = (side + 1) % top.length;
++    if ((corner.depth + top[next].depth) / 2 <= faceDepth) return [];
++    return `<polygon class="deck-wall" points="${coordinates([corner, top[next], bottom[next], bottom[side]])}"/>`;
++  }).join('');
++  const screws = ring(level - 1, .9).map(p => `<circle class="deck-fastener" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.7"/>`).join('');
++  return `<g class="machine-deck deck-${deck.finish}">${walls}
++    <polygon class="deck-top" points="${coordinates(top)}"/>
++    <polygon class="deck-inlay" points="${coordinates(ring(level - 1, .86))}"/>
++    ${screws}</g>`;
++}
++
++function gimbal(core, radius) {
++  const sections = [[-.52, .92], [1.14, 2.58], [2.84, 4.11], [4.39, 5.46]];
++  const points = (start, end, size) => Array.from({ length: 13 }, (_, index) => {
++    const angle = start + (end - start) * index / 12;
++    const x = Math.cos(angle) * size;
++    const z = Math.sin(angle) * size;
++    return machinePoint(core, x, x * -.22 + z * .48, z);
++  });
++  return sections.map(([start, end]) => {
++    const outer = points(start, end, radius * 1.37);
++    const inner = points(end, start, radius * 1.28);
++    return `<polygon class="gimbal-segment" points="${coordinates([...outer, ...inner])}"/>`;
++  }).join('');
+ }
+ 
+ function sceneryHtml(width, height, positions) {
+   const core = positions.get('reading') || { x: width / 2, y: height / 2 };
+   const rx = Math.max(80, Math.min(width * .38, 375));
+   const ry = Math.max(70, Math.min(height * .39, 190));
+-  const radius = Math.min(width, height) * .25;
++  const radius = Math.min(width, height) * .235;
++  const deckRadius = state.compact ? radius * .9 : radius;
+   const ringCenter = `${core.x}px ${core.y}px`;
+   let ticks = '';
+   for (let index = 0; index < 28; index++) {
+@@ -171,30 +223,22 @@ function sceneryHtml(width, height, positions) {
+     const length = index % 7 === 0 ? 7 : 3;
+     ticks += `<line class="orbit-tick" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - Math.cos(angle) * length).toFixed(1)}" y2="${(y - Math.sin(angle) * length).toFixed(1)}"/>`;
+   }
+-  let seed = 29;
+-  let stars = '';
+-  for (let index = 0; index < 24; index++) {
+-    seed = (seed * 9301 + 49297) % 233280;
+-    const x = 12 + (seed / 233280) * (width - 24);
+-    seed = (seed * 9301 + 49297) % 233280;
+-    const y = 12 + (seed / 233280) * (height - 24);
+-    const radius = index % 6 === 0 ? 1.25 : .75;
+-    stars += `<circle class="orbit-star" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius}"/>`;
+-  }
++  const decks = DECKS.map((deck, index) => machineDeck(core, deckRadius, deck, index)).join('');
+   return `<defs><radialGradient id="commandCoreGlow"><stop offset="0" stop-color="#1c94a5" stop-opacity=".34"/><stop offset="1" stop-color="#1c94a5" stop-opacity="0"/></radialGradient>
+-    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#53bed1" stop-opacity=".06"/><stop offset="1" stop-color="#65b1d3" stop-opacity=".3"/></linearGradient></defs>
++    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#8dabae" stop-opacity=".03"/><stop offset="1" stop-color="#9eb4a9" stop-opacity=".22"/></linearGradient>
++    <linearGradient id="deckSteel" x2="1" y2="1"><stop offset="0" stop-color="#6f7773"/><stop offset=".45" stop-color="#343d3e"/><stop offset="1" stop-color="#20262b"/></linearGradient>
++    <linearGradient id="deckGlass" x2="1" y2="1"><stop offset="0" stop-color="#76a8a0" stop-opacity=".64"/><stop offset="1" stop-color="#29494c" stop-opacity=".85"/></linearGradient></defs>
+     <g>
+-      ${projectionPlane(width, height, core, radius)}
+-      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.75}"/>
++      ${projectionPlane(width, height)}
++      <ellipse class="machine-shadow" cx="${core.x}" cy="${core.y + deckRadius * 1.37}" rx="${deckRadius * 1.92}" ry="${deckRadius * .61}"/>
++      ${decks}
++      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.65}"/>
+       <ellipse class="orbit-ring" cx="${core.x}" cy="${core.y}" rx="${rx}" ry="${ry}"/>
+-      <ellipse class="orbit-ring is-mid" cx="${core.x}" cy="${core.y}" rx="${rx * .72}" ry="${ry * .7}"/>
+-      <ellipse class="orbit-ring is-far" cx="${core.x}" cy="${core.y}" rx="${rx * .74}" ry="${ry * .22}" transform="rotate(-21 ${core.x} ${core.y})"/>
+       <path class="orbit-axis" d="M${core.x} ${Math.max(8, core.y - ry * 1.12)}V${Math.min(height - 8, core.y + ry * 1.12)}M${Math.max(8, core.x - rx * 1.08)} ${core.y}H${Math.min(width - 8, core.x + rx * 1.08)}"/>
+       <g class="orbit-mesh">${wireSphere(core, radius)}</g>
+-      <circle class="orbit-instrument" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}"/>
++      ${gimbal(core, radius)}
+       <circle class="orbit-sweep" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}" pathLength="100" style="transform-origin:${ringCenter}"/>
+       ${ticks}
+-      ${stars}
+     </g>`;
+ }
+ 
+@@ -384,8 +428,33 @@ function setZoom(next) {
+   renderGraph();
+ }
+ 
++function setLayerButton(expanded) {
++  refs.layers.setAttribute('aria-pressed', String(expanded));
++  refs.layers.textContent = expanded ? '收拢分层' : '展开分层';
++}
++
++function toggleLayers() {
++  const expanded = refs.layers.getAttribute('aria-pressed') !== 'true';
++  setLayerButton(expanded);
++  cancelAnimationFrame(layerFrame);
++  const target = Number(expanded);
++  const start = state.layerSpread;
++  const started = performance.now();
++  const paint = now => {
++    const progress = reducedMotion.matches ? 1 : Math.min(1, (now - started) / 340);
++    state.layerSpread = start + (target - start) * (1 - (1 - progress) ** 3);
++    const { width, height } = refs.viewport.getBoundingClientRect();
++    if (width && height) refs.scenery.innerHTML = sceneryHtml(width, height, state.positions);
++    if (progress < 1) layerFrame = requestAnimationFrame(paint);
++  };
++  layerFrame = requestAnimationFrame(paint);
++}
++
+ function resetView() {
+   stopRelease();
++  cancelAnimationFrame(layerFrame);
++  state.layerSpread = 0;
++  setLayerButton(false);
+   state.zoom = 1;
+   state.yaw = 0;
+   state.pitch = 0;
+@@ -420,6 +489,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
+     mobileList: document.getElementById('commandMobileNodes'),
+     allNodes: document.getElementById('commandAllNodes'),
+     allNodeCount: document.getElementById('commandAllNodeCount'),
++    layers: document.getElementById('graphLayers'),
+   };
+   const select = event => {
+     const button = event.target.closest('[data-node]');
+@@ -434,6 +504,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
+   document.getElementById('graphZoomIn').addEventListener('click', () => setZoom(state.zoom + .1));
+   document.getElementById('graphZoomOut').addEventListener('click', () => setZoom(state.zoom - .1));
+   document.getElementById('graphReset').addEventListener('click', resetView);
++  refs.layers.addEventListener('click', toggleLayers);
+ 
+   refs.viewport.addEventListener('pointerdown', event => {
+     if (event.target.closest('button') || event.button !== 0) return;
+diff --git a/cet-studyhack-command-edition/web/command-radar.css b/cet-studyhack-command-edition/web/command-radar.css
+index 03e73f4..faccb31 100644
+--- a/cet-studyhack-command-edition/web/command-radar.css
++++ b/cet-studyhack-command-edition/web/command-radar.css
+@@ -1,4 +1,4 @@
+-.command-radar { padding: 1px 14px 12px; }
++.command-radar { padding: 9px 14px 12px; }
+ 
+ .radar-board {
+   position: relative;
+@@ -7,14 +7,17 @@
+   margin-inline: auto;
+   aspect-ratio: 300 / 247;
+   isolation: isolate;
+-  background: radial-gradient(ellipse at 50% 50%, #1a394877, transparent 67%);
++  background: radial-gradient(ellipse at 50% 48%, #2d4235, #222b23 44%, #151a15 100%);
++  border: 1px solid #626351;
++  border-bottom-color: #86816b;
++  box-shadow: inset 0 1px 9px #060a06d9, 0 3px #10150f;
+ }
+ 
+ .radar-plot { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+ .radar-dial, .radar-grid, .radar-spoke { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
+-.radar-dial { stroke: #5790a43b; stroke-dasharray: 1 5; }
+-.radar-grid { stroke: #5f91a440; }
+-.radar-spoke { stroke: #42647b; }
++.radar-dial { stroke: #a1ad8c64; stroke-dasharray: 1 5; }
++.radar-grid { stroke: #8ea78557; }
++.radar-spoke { stroke: #627a62; }
+ .radar-spoke.is-active { stroke: #7cdfdb; stroke-width: 1.5; }
+ .radar-edge, .radar-shape { stroke: #a3f1e7; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+ .radar-edge { fill: none; }
+@@ -27,21 +30,21 @@
+   position: absolute; z-index: 1; left: var(--axis-x); top: var(--axis-y);
+   display: grid; place-items: center; align-content: center; min-width: 44px; min-height: 44px;
+   transform: translate(-50%, -50%); padding: 3px 4px; border: 1px solid transparent;
+-  border-radius: 3px; background: transparent; color: #c2d4de; cursor: pointer;
++  border-radius: 2px; background: transparent; color: #deded0; cursor: pointer;
+   font-size: 11px; line-height: 1.22; white-space: nowrap;
+   transition: color .16s, background .16s, border-color .16s;
+ }
+ .radar-axis b { color: #a2d8d5; margin-top: 1px; font: 700 11px/1.15 ui-monospace, Consolas, monospace; }
+ .radar-axis[data-samples="0"] b { color: #8598ad; }
+-.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #ebfffd; border-color: #64b6b670; background: #122b3996; }
++.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #f7f3e4; border-color: #b6ab8970; background: #2c3626bd; }
+ .radar-readout {
+   display: flex; justify-content: space-between; align-items: center; gap: 8px;
+-  padding: 10px 12px; min-height: 58px; border: 1px solid #395466;
+-  border-left: 2px solid #7de2da; background: #091724;
++  margin-top: 9px; padding: 10px 12px; min-height: 58px; border: 1px solid #4a5143;
++  border-left: 2px solid #a2bc98; background: #191f18; box-shadow: inset 0 2px 6px #0e140f;
+ }
+ .radar-readout > div { display: grid; gap: 2px; }
+-.radar-caption { color: #e6f0f7; font-size: 12px; }
+-.radar-sample { color: #a4b9c9; font-size: 10px; }
++.radar-caption { color: #e9e7d7; font-size: 12px; }
++.radar-sample { color: #b9c0ab; font-size: 10px; }
+ .radar-value { color: #c7f6ed; font: 700 20px/1 ui-monospace, Consolas, monospace; white-space: nowrap; }
+ 
+ @media (max-width: 767px) {
+diff --git a/cet-studyhack-command-edition/web/command.css b/cet-studyhack-command-edition/web/command.css
+index 6be11de..c45bc8f 100644
+--- a/cet-studyhack-command-edition/web/command.css
++++ b/cet-studyhack-command-edition/web/command.css
+@@ -1,12 +1,12 @@
+-body[data-view="command"] {
+-  --command-bg: #07111f;
+-  --command-surface: #0d1929;
+-  --command-text: #e7effa;
+-  --command-muted: #a6b8cd;
+-  --command-border: #25354b;
+-  --command-cyan: #37d9e8;
+-  --command-amber: #f2b35d;
+-  --command-green: #42d5a1;
++body[data-view="command"], .view-command {
++  --command-bg: #121513;
++  --command-surface: #202322;
++  --command-text: #f2eee2;
++  --command-muted: #bcbab0;
++  --command-border: #3a403b;
++  --command-cyan: #a2e0d2;
++  --command-amber: #eea16e;
++  --command-green: #81c9a2;
+   --command-purple: #a18bfa;
+   color: var(--command-text);
+   background-color: var(--command-bg);
+@@ -16,14 +16,14 @@ body[data-view="command"] .wrap { max-width: 1720px; --gap: 18px; }
+ body[data-mode="command"] .tabnav { display: none; }
+ body[data-view="command"] .bg {
+   background-color: var(--command-bg);
+-  background-image: radial-gradient(ellipse at 50% 6%, #1f3749 0%, transparent 57%);
++  background-image: radial-gradient(ellipse at 38% 0%, #3b3931 0%, transparent 62%);
+ }
+ body[data-view="command"] .bg .orb { display: none; }
+-body[data-view="command"] .header { background: rgba(7, 17, 31, .94); border-color: var(--command-border); }
++body[data-view="command"] .header { background: #141715f5; border-color: #4a4940; }
+ body[data-view="command"] .brand .titles h1 { color: var(--command-text); }
+ body[data-view="command"] .brand .titles .sub { color: var(--command-muted); }
+-body[data-view="command"] .brand .logo { background: #152837; color: var(--command-cyan); box-shadow: none; border: 1px solid #335360; border-radius: 3px; }
+-body[data-view="command"] .status-pill { color: var(--command-muted); background: #0b1727; border-color: var(--command-border); }
++body[data-view="command"] .brand .logo { background: #272923; color: var(--command-text); box-shadow: inset 0 1px #666255; border: 1px solid #545548; border-radius: 2px; }
++body[data-view="command"] .status-pill { color: var(--command-muted); background: #1c211c; border-color: var(--command-border); }
+ body[data-view="command"] .status-pill[data-state="ready"] { color: var(--command-green); }
+ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: var(--command-green); box-shadow: 0 0 0 4px rgba(66, 213, 161, .1); }
+ 
+@@ -38,18 +38,6 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .command-return svg { width: 16px; height: 16px; transform: rotate(180deg); }
+ .command-return:hover { color: var(--command-cyan); border-color: var(--command-cyan); }
+ 
+-.view-command {
+-  --command-bg: #07111f;
+-  --command-surface: #0d1929;
+-  --command-text: #e7effa;
+-  --command-muted: #a6b8cd;
+-  --command-border: #25354b;
+-  --command-cyan: #37d9e8;
+-  --command-amber: #f2b35d;
+-  --command-green: #42d5a1;
+-  --command-purple: #a18bfa;
+-  color: var(--command-text);
+-}
+ .view-command * { box-sizing: border-box; }
+ .view-command button { font: inherit; }
+ .view-command button:focus-visible, .command-return:focus-visible { outline: 2px solid var(--command-cyan); outline-offset: 3px; }
+@@ -57,20 +45,21 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .command-shell { max-width: 1720px; margin: 0 auto; }
+ .command-console {
+   overflow: hidden;
+-  border: 1px solid #425b6d;
+-  border-radius: 3px;
++  border: 1px solid #726f62;
++  border-radius: 2px;
+   background: var(--command-surface);
+-  box-shadow: 0 20px 55px #02060b80;
++  box-shadow: 0 3px 0 #222623, 0 7px 0 #121513, 0 23px 38px #0305039e;
+ }
+ .command-toolbar {
+   min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 22px;
+-  padding: 10px 20px; border-bottom: 1px solid #3d5365;
+-  background: linear-gradient(108deg, #213545 0%, #142433 46%, #0c1a28 100%);
++  padding: 10px 20px; border-bottom: 1px solid #57574b;
++  box-shadow: inset 0 1px #8d897371, inset 0 -3px #171916;
++  background: repeating-linear-gradient(0deg, #e2d7bc08 0 1px, transparent 1px 4px), linear-gradient(108deg, #3e4037 0%, #292c27 48%, #202522 100%);
+ }
+-.command-context { min-width: 0; border-left: 3px solid var(--command-cyan); padding-left: 12px; }
++.command-context { min-width: 0; border-left: 4px solid #c28461; padding-left: 13px; }
+ .command-context h2 {
+-  margin: 0; color: #ecf8fc; font-size: clamp(24px, 2.7vw, 37px);
+-  font-weight: 800; letter-spacing: .065em; line-height: 1.15;
++  margin: 0; color: var(--command-text); font-size: clamp(26px, 3vw, 42px);
++  font-weight: 800; letter-spacing: .045em; line-height: 1.08;
+ }
+ .command-action { display: flex; align-items: center; gap: 14px; min-width: 0; }
+ .command-action-copy { min-width: 0; text-align: right; }
+@@ -81,8 +70,9 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ .command-primary {
+   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+-  min-height: 46px; padding: 0 16px; color: #10202d; border-color: #d0e6e7;
+-  background: #d0e6e7; font-size: 12px; font-weight: 800; white-space: nowrap;
++  min-height: 46px; padding: 0 16px; color: #22231c; border-color: #f0e6ca;
++  background: #e8ddbf; box-shadow: inset 0 -3px #bdad85, 0 2px #101311;
++  font-size: 12px; font-weight: 800; white-space: nowrap;
+ }
+ .command-primary:hover { filter: brightness(1.08); }
+ .command-primary svg { width: 18px; height: 18px; flex: 0 0 18px; }
+@@ -95,14 +85,14 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   border-bottom: 1px solid var(--command-border);
+ }
+ .command-panel { position: relative; min-width: 0; }
+-.command-performance { grid-area: performance; border-right: 1px solid var(--command-border); background: linear-gradient(180deg, #112634, #0c1825 81%); }
++.command-performance { grid-area: performance; border-right: 1px solid #55584c; background: linear-gradient(140deg, #2c302a, #1c211d 58%); }
+ .command-graph-panel { grid-area: graph; background: var(--command-bg); }
+-.command-side { grid-area: side; border-left: 1px solid var(--command-border); background: linear-gradient(180deg, #142432, #0c1825 81%); }
++.command-side { grid-area: side; border-left: 1px solid #55584c; background: linear-gradient(155deg, #30312a, #1d221e 58%); }
+ .command-section-head {
+   min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+   padding: 12px 15px; border-bottom: 1px solid var(--command-border);
+ }
+-.command-section-head h3 { margin: 0; font-size: 14px; letter-spacing: .045em; }
++.command-section-head h3 { margin: 0; font-size: 15px; letter-spacing: .035em; }
+ .command-section-head > span, .command-section-head p {
+   margin: 0; color: var(--command-muted); font-size: 10px; line-height: 1.5;
+ }
+@@ -127,23 +117,25 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   color: var(--command-amber); background: rgba(242, 179, 93, .06); font-size: 10px;
+ }
+ 
+-.command-graph-head { background: #0a1826; }
++.command-graph-head { background: #1b211e; box-shadow: inset 0 -3px #101512; }
+ .command-graph-head > div:first-child { min-width: 0; }
+ .command-graph-head p { max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .graph-controls { display: flex; gap: 4px; flex: 0 0 auto; }
+ .graph-controls button {
+   min-width: 44px; min-height: 44px; padding: 0 9px;
+-  color: var(--command-muted); background: #0a1625; font-size: 15px;
++  color: var(--command-text); background: #2a2f29; font-size: 15px;
++  box-shadow: inset 0 1px #ffffff1c, inset 0 -2px #101510;
+ }
+ .graph-controls button:hover { color: var(--command-cyan); border-color: var(--command-cyan); }
+ 
+ .graph-viewport {
+   position: relative; height: clamp(420px, 48vh, 480px); overflow: hidden;
+   background:
+-    radial-gradient(ellipse at 50% 40%, #103647 0%, transparent 65%),
+-    linear-gradient(#699ca015 1px, transparent 1px),
+-    linear-gradient(90deg, #699ca015 1px, transparent 1px), #050e19;
+-  background-size: auto, 32px 32px, 32px 32px, auto;
++    radial-gradient(ellipse at 49% 56%, #243b36 0%, transparent 63%),
++    linear-gradient(#a8af9a11 1px, transparent 1px),
++    linear-gradient(90deg, #a8af9a11 1px, transparent 1px), #111715;
++  background-size: auto, 38px 38px, 38px 38px, auto;
++  box-shadow: inset 0 0 20px #080c0aee, inset 0 4px #0b100d;
+   cursor: grab; touch-action: pan-y;
+ }
+ .graph-viewport::before {
+@@ -172,19 +164,26 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-viewport.dragging .graph-stage { transition: none; }
+ .orbit-map { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+ .orbit-ring { fill: none; stroke: #8eb9c5; stroke-width: .8; stroke-opacity: .26; vector-effect: non-scaling-stroke; stroke-dasharray: 2 5; }
+-.orbit-ring.is-mid { stroke-opacity: .19; stroke-dasharray: none; }
+-.orbit-ring.is-far { stroke-opacity: .29; stroke-dasharray: 10 5 2 5; }
+ .orbit-axis { fill: none; stroke: var(--command-cyan); stroke-width: .7; stroke-opacity: .1; stroke-dasharray: 3 9; }
+ .orbit-tick { stroke: #9dd5d8; stroke-width: 1; stroke-opacity: .43; }
+-.orbit-star { fill: #a6dce3; opacity: .2; }
+ .core-glow { fill: url(#commandCoreGlow); }
+ .field-plane { fill: none; stroke: url(#commandPlaneLight); stroke-width: 1; }
+-.projection-base { fill: #10536318; stroke: #7de0e04d; stroke-width: 1; stroke-dasharray: 1 3; }
+-.projection-base-inner { fill: none; stroke: #458f9c72; stroke-width: 1; }
++.machine-shadow { fill: #020604; opacity: .65; filter: blur(7px); }
++.deck-top, .deck-wall { stroke: #b2a98d83; stroke-width: .85; stroke-linejoin: round; }
++.deck-top { fill: url(#deckSteel); }
++.deck-wall { fill: #26281f; }
++.deck-base .deck-top { fill: #353a30; }
++.deck-base .deck-wall { fill: #1c211a; }
++.deck-band .deck-top { fill: #74604c; }
++.deck-band .deck-wall { fill: #91694d; stroke: #bc9573; }
++.deck-glass .deck-top { fill: url(#deckGlass); stroke: #a1d6c5b5; }
++.deck-glass .deck-wall { fill: #253f3d; stroke: #75aea6bf; }
++.deck-inlay { fill: none; stroke: #ede8cf55; stroke-width: .7; }
++.deck-fastener { fill: #1e241c; stroke: #b9b39c9e; stroke-width: .7; }
++.gimbal-segment { fill: #566762c7; stroke: #a2c7bab5; stroke-width: 1; stroke-linejoin: round; }
+ .orbit-mesh { fill: none; }
+ .orbit-mesh-back { stroke: #5ea5b0; stroke-width: .65; stroke-opacity: .26; }
+-.orbit-mesh-front { stroke: #8ae3e9; stroke-width: .8; stroke-opacity: .64; filter: drop-shadow(0 0 5px #71e3e655); }
+-.orbit-instrument { fill: none; stroke: #83c8d1; stroke-width: 3; stroke-opacity: .37; stroke-dasharray: 2 6 18 6; }
++.orbit-mesh-front { stroke: #a3d9ce; stroke-width: .8; stroke-opacity: .74; }
+ .orbit-sweep {
+   fill: none; stroke: #99f7ef; stroke-width: 2; stroke-dasharray: 9 91; stroke-linecap: round;
+   filter: drop-shadow(0 0 4px #62f3e8a6);
+@@ -286,12 +285,18 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ 
+ .map-legend {
+-  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; min-height: 31px;
+-  border-top: 1px solid var(--command-border); padding: 3px 13px; color: #a0b4c7; background: #0b1726;
++  display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: center; min-height: 44px;
++  border-top: 1px solid #505347; padding: 3px 10px; color: var(--command-muted); background: #212720;
+   font-size: 10px;
+ }
+ .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+-.map-legend span:last-child { margin-left: auto; }
++.map-hint { margin-left: auto; }
++.view-command #graphLayers {
++  min-height: 36px; padding: 3px 10px; border: 1px solid #656457; border-radius: 2px;
++  background: #353a30; color: #eee8d7; cursor: pointer; box-shadow: inset 0 1px #ffffff22, inset 0 -2px #181c16;
++  font-size: 11px;
++}
++.view-command #graphLayers:hover, .view-command #graphLayers[aria-pressed="true"] { background: #d5d2ad; color: #20271d; border-color: #d5d2ad; }
+ .map-legend i { width: 6px; height: 6px; border: 1px solid #9ab6c9; border-radius: 100%; }
+ .map-legend span:nth-child(2) i { border-color: var(--command-amber); background: var(--command-amber); }
+ 
+@@ -326,7 +331,7 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .monitor-row.record-flash { animation: row-record .8s ease 1; }
+ .command-empty { display: grid; place-items: center; min-height: 92px; padding: 18px 15px; color: var(--command-muted); text-align: center; font-size: 10.5px; line-height: 1.7; }
+ 
+-.command-logs { border-top: 1px solid var(--command-border); background: #0b1726; }
++.command-logs { border-top: 1px solid #51534a; background: #1c211d; }
+ .command-logs .command-section-head { border-bottom: 0; min-height: 48px; padding-block: 9px; }
+ .command-text-btn { padding: 0 11px; color: var(--command-cyan); border-color: transparent; background: transparent; font-size: 10.5px; }
+ .log-list {
+@@ -397,7 +402,8 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   .command-toolbar { gap: 8px; padding: 9px 10px; }
+   .command-context { padding-left: 7px; }
+   .command-context h2 { font-size: clamp(17px, 5.3vw, 22px); }
+-  .command-action-copy { display: none; }
++  .command-action-copy, .map-legend .map-hint { display: none; }
++  .view-command #graphLayers { margin-left: auto; min-height: 44px; }
+   .command-primary { padding-inline: 9px; }
+   .command-primary { width: 100%; }
+   .command-grid { display: flex; flex-direction: column; }
+@@ -419,14 +425,14 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ 
+   .mobile-node-bar {
+     display: flex; align-items: center; justify-content: space-between; gap: 10px;
+-    padding: 8px 12px; border-top: 1px solid var(--command-border); background: #0b1726;
++    padding: 8px 12px; border-top: 1px solid var(--command-border); background: #1c211d;
+   }
+   .mobile-node-bar > span { color: #8296ad; font-size: 9.5px; }
+   .mobile-node-bar button { min-height: 40px; padding: 0 10px; color: var(--command-cyan); border-color: #2a6570; background: rgba(55, 217, 232, .05); font-size: 10.5px; }
+   .mobile-node-bar button b { font: inherit; }
+   .mobile-node-list:not([hidden]) {
+     display: grid; grid-template-columns: 1fr; gap: 0; padding: 0 12px 8px;
+-    border-top: 1px solid rgba(37, 53, 75, .65); background: #0b1726;
++    border-top: 1px solid var(--command-border); background: #1c211d;
+   }
+   .mobile-node-row {
+     min-height: 44px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+diff --git a/cet-studyhack-command-edition/web/command.js b/cet-studyhack-command-edition/web/command.js
+index 836b532..b9dab27 100644
+--- a/cet-studyhack-command-edition/web/command.js
++++ b/cet-studyhack-command-edition/web/command.js
+@@ -1,7 +1,7 @@
+ import { ERROR_LABELS, LAB_PRESETS } from './lab-data.js';
+ import { escapeHtml } from './markdown.js';
+ import { __labState, openReadingLab } from './lab.js';
+-import { currentTab, openEstimator, returnToLearning } from './shell.js';
++import { currentTab, openEstimator } from './shell.js';
+ import { groupErrorRecords, historyStorageStatus, listHistory, summarizeHistory } from './command-history.js';
+ import { GRAPH_NODES, graphNodeLabel, initCommandGraph } from './command-graph.js';
+ import { renderCommandRadar } from './command-radar.js';
+@@ -199,7 +199,6 @@ function openTraining(button) {
+   openReadingLab({ presetId: button.dataset.preset || null, startPresetMaterial: Boolean(button.dataset.preset) });
+ }
+ 
+-$('commandReturn').addEventListener('click', returnToLearning);
+ $('commandContinue').addEventListener('click', () => openReadingLab({ presetId: __labState.material?.id || null }));
+ $('commandShowAll').addEventListener('click', () => { expandedLogs = !expandedLogs; renderLogs(); });
+ $('commandNodeDetail').addEventListener('click', event => {
+diff --git a/cet-studyhack-command-edition/web/estimator.js b/cet-studyhack-command-edition/web/estimator.js
+index 48813a1..7351799 100644
+--- a/cet-studyhack-command-edition/web/estimator.js
++++ b/cet-studyhack-command-edition/web/estimator.js
+@@ -346,6 +346,7 @@ function renderEstimate() {
+   const e = estimate;
+   $('overviewHint').textContent = `${e.level === 'CET6' ? '六级 CET-6' : '四级 CET-4'} · 公开常模表插值与项目假设`;
+   $('totalScore').textContent = e.total;
++  $('scoreDial').style.setProperty('--score-angle', `${Math.max(0, Math.min(e.total, 710)) / 710 * 270}deg`);
+   $('totalRange').textContent = `${e.range[0]} – ${e.range[1]}`;
+   $('gapValue').textContent = `${e.gap >= 0 ? '+' : ''}${e.gap} 分`;
+   $('gapValue').dataset.tone = e.gapTone;
+diff --git a/cet-studyhack-command-edition/web/index.html b/cet-studyhack-command-edition/web/index.html
+index 5f3af14..595d88a 100644
+--- a/cet-studyhack-command-edition/web/index.html
++++ b/cet-studyhack-command-edition/web/index.html
+@@ -14,6 +14,7 @@
+   <link rel="stylesheet" href="lab.css" />
+   <link rel="stylesheet" href="command.css" />
+   <link rel="stylesheet" href="command-radar.css" />
++  <link rel="stylesheet" href="workbench.css" />
+ </head>
+ <body data-view="command" data-mode="command">
+   <!-- icon sprite: reading lab uses #i-*, estimator uses #e-i-* -->
+@@ -69,12 +70,12 @@
+       <span class="status-pill" id="statusPill" data-state="checking" role="status">
+         <span class="dot"></span><span class="txt" id="statusText">检测服务…</span>
+       </span>
+-      <button class="command-return" id="commandReturn" type="button"><svg><use href="#i-arrow"/></svg><span>简约模式</span></button>
++      <button class="command-return" id="commandReturn" type="button"><svg><use href="#i-arrow"/></svg><span id="commandReturnLabel">简约模式</span></button>
+     </div>
+   </header>
+ 
+   <main class="wrap">
+-    <nav class="tabnav" role="tablist" aria-label="简约模式功能切换">
++    <nav class="tabnav" role="tablist" aria-label="功能切换">
+       <button class="tab" id="tab-reading" role="tab" type="button" aria-selected="false" aria-controls="view-reading" tabindex="-1">
+         <svg><use href="#i-target"/></svg><span>错因实验室</span>
+       </button>
+@@ -82,7 +83,7 @@
+         <svg><use href="#e-i-chart"/></svg><span>参考估分</span>
+       </button>
+       <button class="tab" id="tab-command" role="tab" type="button" aria-selected="true" aria-controls="view-command">
+-        <svg><use href="#e-i-target"/></svg><span>返回作战中心</span>
++        <svg><use href="#e-i-target"/></svg><span id="commandTabLabel">作战中心</span>
+       </button>
+     </nav>
+ 
+@@ -97,8 +98,10 @@
+         <section class="card lab-hero">
+           <div class="lh-copy">
+             <span class="eyebrow"><svg width="15" height="15"><use href="#i-spark"/></svg> StudyHack · 四六级阅读错因实验室</span>
+-            <h2>不只看完解析，而是验证你真的学会了</h2>
+-            <p>选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
++            <h2 class="simple-intro">不只看完解析，而是验证你真的学会了</h2>
++            <p class="simple-intro">选一篇材料 → 选答案 → 点原文句子作为依据 → 选信心程度 → 先看<b>不泄露答案</b>的短提示 → 重答后看正确项、你的证据、正确证据和错因 → 再做一道陌生材料的同类题。</p>
++            <h2 class="workbench-intro">错因实验室</h2>
++            <p class="workbench-intro">圈出原文依据，核对错因，再做一道同类题。</p>
+             <div class="lh-actions">
+               <button class="btn btn-primary btn-lg" id="labStartBtn" type="button"><svg><use href="#i-spark"/></svg>开始练习</button>
+               <button class="btn btn-lg-ghost" id="labCustomBtn" type="button"><svg><use href="#i-file"/></svg>使用自带材料</button>
+@@ -110,6 +113,7 @@
+             <div><b>证据卡</b><span>some / all 并排标记</span></div>
+             <div><b>同类题</b><span>用新题验证迁移</span></div>
+           </div>
++          <div class="instrument-window" data-instrument="evidence" aria-hidden="true"></div>
+         </section>
+ 
+         <div class="lab-grid">
+@@ -149,6 +153,10 @@
+ 
+       <!-- ==================== 阅读工具（按需加载） ==================== -->
+       <div class="tool-panel" id="toolPanel" role="tabpanel" aria-labelledby="subtab-tool" hidden>
++        <header class="workbench-heading">
++          <h2>阅读工具</h2>
++          <div class="instrument-window" data-instrument="optics" aria-hidden="true"></div>
++        </header>
+         <div class="workspace">
+           <section class="input-panel" aria-label="阅读工具输入区">
+             <details class="card guide" open>
+@@ -324,7 +332,11 @@
+                 </div>
+                 <div class="graph-rulers" aria-hidden="true"><i></i><i></i></div>
+               </div>
+-              <div class="map-legend"><span><i></i>错因</span><span><i></i>已有记录</span><span>拖动旋转 · 点击聚焦</span></div>
++              <div class="map-legend">
++                <span><i></i>错因</span><span><i></i>已有记录</span>
++                <span class="map-hint">拖动旋转 · 点击聚焦</span>
++                <button type="button" id="graphLayers" aria-pressed="false">展开分层</button>
++              </div>
+               <div class="mobile-node-bar">
+                 <span>主要错因</span>
+                 <button type="button" id="commandAllNodes" aria-expanded="false">全部错因 <b id="commandAllNodeCount"></b></button>
+@@ -357,6 +369,10 @@
+ 
+     <!-- ==================== 参考估分 ==================== -->
+     <section class="view view-estimator" id="view-estimator" role="tabpanel" aria-labelledby="tab-estimator">
++      <header class="workbench-heading">
++        <h2>参考估分</h2>
++        <div class="instrument-window" data-instrument="calibration" aria-hidden="true"></div>
++      </header>
+       <div class="disclaimer-banner" role="note">
+         <svg><use href="#e-i-alert"/></svg>
+         <div><b>本结果仅为参考估算，不等于官方成绩。</b> 换算基于公开常模表的插值与项目假设，存在模型误差；最终成绩以教育部教育考试院发布为准。</div>
+@@ -535,6 +551,7 @@
+             </div>
+             <div class="card-body">
+               <div class="total-row">
++                <div class="score-dial" id="est-scoreDial" aria-hidden="true"><span></span></div>
+                 <div class="total-num"><span id="est-totalScore">0</span><small>/ 710</small></div>
+                 <div class="total-side">
+                   <div class="range-line">参考区间 <b id="est-totalRange">0 – 0</b></div>
+diff --git a/cet-studyhack-command-edition/web/lab.js b/cet-studyhack-command-edition/web/lab.js
+index 32b8681..eb67803 100644
+--- a/cet-studyhack-command-edition/web/lab.js
++++ b/cet-studyhack-command-edition/web/lab.js
+@@ -320,6 +320,7 @@ function stageHead(kicker, title, extra = '') {
+       <span class="stage-kicker">${escapeHtml(kicker)}</span>
+       <h2>${escapeHtml(title)}</h2>
+     </div>
++    <div class="stage-assembly" aria-hidden="true"><i></i><i></i><i></i></div>
+     <div class="sh-actions">${extra}<button type="button" class="btn btn-sm btn-ghost" data-act="restart"><svg><use href="#i-refresh"/></svg>从头开始</button></div>
+   </div>`;
+ }
+@@ -907,6 +908,7 @@ function currentDraft() {
+ }
+ 
+ function render() {
++  labStage.dataset.screen = state.screen;
+   updateLabModeBadge();
+   document.querySelectorAll('.preset').forEach(el => {
+     el.classList.toggle('active', state.mode === 'preset' && el.dataset.id === state.material?.id);
+diff --git a/cet-studyhack-command-edition/web/shell.js b/cet-studyhack-command-edition/web/shell.js
+index a0f41a0..eff6383 100644
+--- a/cet-studyhack-command-edition/web/shell.js
++++ b/cet-studyhack-command-edition/web/shell.js
+@@ -119,6 +119,7 @@ export function setStatus(state, text) {
+ 
+ let activeTab = 'command';
+ let returnTab = 'reading';
++let mode = 'command';
+ 
+ export function currentTab() {
+   return activeTab;
+@@ -128,30 +129,37 @@ export function showTab(key, persist = true) {
+   const active = TABS.find(t => t.key === key) || TABS.find(t => t.key === 'command');
+   const previous = activeTab;
+   activeTab = active.key;
+-  if (active.key === 'command' && previous !== 'command') returnTab = previous === 'estimator' ? 'estimator' : 'reading';
++  if (active.key === 'command') {
++    if (previous !== 'command') returnTab = previous;
++    mode = 'command';
++  }
+   for (const t of TABS) {
+     const on = t.key === active.key;
+     $(t.tab).setAttribute('aria-selected', String(on));
+     $(t.tab).tabIndex = on ? 0 : -1;
+     $(t.view).classList.toggle('active', on);
+   }
+-  const mode = active.key === 'command' ? 'command' : 'simple';
+   document.body.dataset.view = active.key;
+   document.body.dataset.mode = mode;
+-  $('commandReturn').hidden = mode !== 'command';
++  $('commandReturnLabel').textContent = mode === 'command' ? '简约模式' : '科技模式';
++  $('commandTabLabel').textContent = mode === 'command' ? '作战中心' : '返回作战中心';
+   document.title = active.title;
+   $('brandSub').textContent = mode === 'command'
+     ? 'CET 作战中心'
+     : '简约模式 · 错因实验室 / 参考估分';
++  if (previous !== active.key) window.scrollTo({ top: 0, behavior: 'instant' });
+   if (active.key !== 'command' && persist) {
+     try { localStorage.setItem('cet.tab', active.key); } catch {}
+   }
+   window.dispatchEvent(new CustomEvent('cet:viewchange', { detail: { key: active.key, previous, returnTab, mode } }));
+ }
+ 
+-export function returnToLearning() {
+-  showTab(returnTab);
+-  $(returnTab === 'estimator' ? 'tab-estimator' : 'tab-reading')?.focus();
++function toggleDisplayMode() {
++  const fromCommand = activeTab === 'command';
++  const target = fromCommand ? returnTab : activeTab;
++  mode = mode === 'command' ? 'simple' : 'command';
++  showTab(target);
++  if (fromCommand) $(`tab-${target}`)?.focus();
+ }
+ 
+ export function openEstimator() {
+@@ -172,6 +180,7 @@ async function probeHealth() {
+ }
+ 
+ export function initShell() {
++  $('commandReturn').addEventListener('click', toggleDisplayMode);
+   for (const t of TABS) {
+     $(t.tab).addEventListener('click', () => showTab(t.key));
+     $(t.tab).addEventListener('keydown', e => {
+diff --git a/cet-studyhack-command-edition/web/workbench.js b/cet-studyhack-command-edition/web/workbench.js
+new file mode 100644
+--- /dev/null
++++ b/cet-studyhack-command-edition/web/workbench.js
+@@ -0,0 +1,32 @@
++const devicePlans = {
++  evidence: [[148, 17, 92, 32], [137, 12, 82, 14], [113, 9, 66, -6], [95, 7, 54, -27]],
++  optics: [[150, 16, 88, 31], [130, 10, 78, 13], [87, 15, 60, -9], [71, 12, 48, -30]],
++  calibration: [[157, 17, 82, 32], [141, 10, 73, 14], [111, 10, 59, -7], [82, 10, 49, -28]],
++};
++
++function mountInstrument(windowEl) {
++  const plan = devicePlans[windowEl.dataset.instrument];
++  const slabs = plan.map(([width, height, depth, level]) => `
++    <span class="instrument-slab" style="--width:${width}px;--height:${height}px;--depth:${depth}px;--level:${level}px">
++      <i class="instrument-face face-front"></i><i class="instrument-face face-side"></i><i class="instrument-face face-top"></i>
++    </span>`).join('');
++  windowEl.innerHTML = `<div class="instrument-scene">${slabs}<span class="instrument-lens"></span></div>`;
++
++  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
++  windowEl.addEventListener('pointermove', event => {
++    if (reducedMotion.matches || event.pointerType !== 'mouse') return;
++    const rect = windowEl.getBoundingClientRect();
++    const horizontal = (event.clientX - rect.left) / rect.width - .5;
++    const vertical = (event.clientY - rect.top) / rect.height - .5;
++    windowEl.style.setProperty('--device-yaw', `${horizontal * 35}deg`);
++    windowEl.style.setProperty('--device-pitch', `${vertical * -18}deg`);
++  });
++  windowEl.addEventListener('pointerleave', () => {
++    windowEl.style.removeProperty('--device-yaw');
++    windowEl.style.removeProperty('--device-pitch');
++  });
++}
++
++export function initWorkbench() {
++  document.querySelectorAll('[data-instrument]').forEach(mountInstrument);
++}
+diff --git a/cet-studyhack-command-edition/web/workbench.css b/cet-studyhack-command-edition/web/workbench.css
+new file mode 100644
+--- /dev/null
++++ b/cet-studyhack-command-edition/web/workbench.css
+@@ -0,0 +1,223 @@
++/* The two modes share controls and content. These materials only apply in mission mode. */
++.workbench-heading, .instrument-window, .score-dial, .workbench-intro, .stage-assembly { display: none; }
++body[data-mode="command"] .simple-intro { display: none; }
++body[data-mode="command"] .workbench-intro { display: block; }
++
++body[data-mode="command"] {
++  --site-bg: #141814;
++  --site-surface: #252a24;
++  --site-fg: #f3eee1;
++  --site-muted: #c5c5b8;
++  --site-border: #52584c;
++  --site-accent: #b6dfc8;
++  --site-on-accent: #15241a;
++  --site-radius: 3px;
++  --accent-deep: #b9e2cd;
++  --accent-soft: #2e4436;
++  --accent-glow: #acdfbc30;
++  --ok: #99ddaf;
++  --ok-soft: #233a29;
++  --warn: #f0b281;
++  --warn-soft: #433024;
++  --bad: #ffad96;
++  --bad-soft: #492b24;
++  --info: #b6d6ce;
++  --panel-edge: #0b0f0c;
++  --shadow-sm: 0 3px var(--panel-edge), 0 5px #45493b;
++  --shadow-md: 0 4px var(--panel-edge), 0 14px 25px #0005;
++  --shadow-lg: 0 11px 27px #0008;
++  --gap: 18px;
++  color-scheme: dark;
++}
++
++body[data-mode="command"] .bg { background: radial-gradient(ellipse at 34% 0%, #454036 0%, transparent 59%), #121513; }
++body[data-mode="command"][data-view="command"] .bg { background-color: var(--command-bg); }
++body[data-mode="command"] .bg .orb { display: none; }
++body[data-mode="command"] .header { background: #141715f5; border-color: #4a4940; }
++body[data-mode="command"] .brand .logo { border: 1px solid #595748; background: #292e26; color: #e8ddbf; box-shadow: inset 0 1px #716a56; }
++body[data-mode="command"] .command-return { color: var(--site-fg); border-color: var(--site-border); background: #282d25; }
++body[data-mode="simple"] .command-return { color: var(--site-fg); border-color: var(--site-border); background: var(--site-surface); }
++
++body[data-mode="command"] .tabnav {
++  display: flex; position: fixed; z-index: 51; top: 10px; left: 50%; transform: translateX(-50%);
++  width: max-content; max-width: calc(100% - 18px); gap: 4px; padding: 4px; margin: 0;
++  border: 1px solid #515449; border-radius: 3px; background: #20251e;
++  box-shadow: inset 0 1px #616455, 0 3px #0a0d0a;
++}
++body[data-mode="command"] .tabnav .tab {
++  min-height: 32px; padding: 5px 11px; color: #d0d3c4; border-radius: 2px; white-space: nowrap;
++  border: 1px solid #414739; background: #2a3027; box-shadow: inset 0 1px #858b7040, 0 2px #10150f;
++  font-size: 12px;
++}
++body[data-mode="command"] .tabnav .tab[aria-selected="true"] {
++  color: #24281e; border-color: #dfd5b6; background: #e5daaf; box-shadow: inset 0 -2px #b3a67b, 0 2px #151811;
++}
++
++@media (max-width: 820px) {
++  body[data-mode="command"] .tabnav { position: relative; z-index: auto; top: auto; left: auto; transform: none; margin: 0 auto 14px; }
++  body[data-mode="command"] .tabnav .tab { padding-inline: 7px; min-height: 34px; }
++  body[data-mode="command"] .tabnav svg { width: 14px; height: 14px; }
++}
++
++body[data-mode="command"] :is(.view-reading,.view-estimator) { --workbench-sheet: #202720; }
++body[data-mode="command"] .workbench-heading,
++body[data-mode="command"] .lab-hero {
++  position: relative; display: grid; grid-template-columns: minmax(0,1fr) minmax(155px,255px);
++  align-items: center; min-height: 140px; margin-bottom: 18px; padding: 13px 20px;
++  border: 1px solid #787363; border-radius: 3px;
++  background: repeating-linear-gradient(0deg,#d8c8a509 0 1px,transparent 1px 4px), linear-gradient(125deg,#454438,#292f26 56%,#1e241e);
++  box-shadow: inset 0 1px #f0df9b40, inset 0 -3px #161a14, 0 5px #131913, 0 7px #545748, 0 14px 23px #080a0780;
++}
++body[data-mode="command"] .workbench-heading h2,
++body[data-mode="command"] .lab-hero h2 {
++  margin: 0; color: #f2edda; font-size: clamp(26px,3.25vw,44px); line-height: 1.16; text-wrap: balance;
++  text-shadow: 0 3px #121811; letter-spacing: .025em;
++}
++body[data-mode="command"] .lab-hero .eyebrow { background: #252a20; color: #d9d1af; border-color: #69664f; }
++body[data-mode="command"] .lab-hero p { color: #dedbc9; }
++body[data-mode="command"] .lab-hero::after, body[data-mode="command"] .lh-facts { display: none; }
++
++body[data-mode="command"] .instrument-window {
++  position: relative; display: block; min-width: 0; height: 148px; overflow: hidden; perspective: 590px;
++  background: radial-gradient(ellipse at 50% 55%,#9ecaaa24,transparent 66%);
++}
++.instrument-scene {
++  position: absolute; inset: 0; transform-style: preserve-3d;
++  transform: rotateX(calc(-29deg + var(--device-pitch,0deg))) rotateY(calc(-31deg + var(--device-yaw,0deg)));
++  transition: transform .38s cubic-bezier(.22,.8,.2,1);
++}
++.instrument-slab {
++  position: absolute; top: 50%; left: 50%; width: var(--width); height: var(--height);
++  transform: translate(-50%,calc(-50% + var(--level))); transform-style: preserve-3d;
++  animation: seat-layer .64s cubic-bezier(.2,.8,.2,1) both;
++}
++.instrument-slab:nth-child(2) { animation-delay: .06s; }
++.instrument-slab:nth-child(3) { animation-delay: .12s; }
++.instrument-slab:nth-child(4) { animation-delay: .18s; }
++.instrument-face { display: block; position: absolute; border: 1px solid #797a5f; }
++.instrument-face.face-front {
++  inset: 0; transform: translateZ(calc(var(--depth) / 2));
++  background: repeating-linear-gradient(90deg,#81866e40 0 2px,transparent 2px 10px),linear-gradient(#454a3b,#1c241b);
++}
++.instrument-slab:nth-child(2) .face-front { border-color: #bc9568; background: linear-gradient(#986745,#573820); }
++.instrument-face.face-side { left: 50%; height: 100%; width: var(--depth); background: #242f23; transform: translateX(calc((var(--width) - var(--depth)) / 2)) rotateY(90deg); }
++.instrument-face.face-top { top: 50%; width: 100%; height: var(--depth); background: linear-gradient(130deg,#6e775f,#3a4937); transform: translateY(calc((var(--height) + var(--depth)) / -2)) rotateX(90deg); }
++.instrument-slab:last-of-type .face-top { background: radial-gradient(ellipse,#a4d2b464,#3b6856); }
++.instrument-lens {
++  position: absolute; top: calc(50% - 33px); left: 50%; width: 54px; height: 54px; border-radius: 50%;
++  transform: translate(-50%,-50%) rotateX(59deg) translateZ(11px);
++  border: 2px solid #b1ddc4; outline: 4px solid #19261d; box-shadow: 0 0 0 5px #69917d, inset 0 0 15px #7ec7ab40;
++  background: conic-gradient(transparent 5%,#a2d2b560 22%,transparent 25%),radial-gradient(#9adbab55,#294d42 54%,#202f25 56%);
++  animation: lens-align .78s ease-out both;
++}
++[data-instrument="optics"] .instrument-lens { width: 66px; height: 66px; transform: translate(-50%,-50%) rotateX(59deg) translateZ(17px); }
++[data-instrument="calibration"] .instrument-lens { border-style: dashed; width: 49px; height: 49px; }
++@keyframes seat-layer { from { transform: translate(-50%,calc(-50% + var(--level) - 16px)) translateZ(18px); opacity: 0; } }
++@keyframes lens-align { from { opacity: 0; filter: brightness(2); } }
++
++body[data-mode="command"] :is(.view-reading,.view-estimator) :is(.card,.stepbar,.gap-block,.scan-inline,.scan-review,.evidence-card,.ev-card,.verdict,.fact,.hint-banner,.attempt-recap) {
++  border-radius: 3px; box-shadow: inset 0 1px #dce3bf17,0 3px #10150f,0 4px #505546;
++}
++body[data-mode="command"] :is(.view-reading,.view-estimator) .card-head {
++  background: linear-gradient(150deg,#3b4034,#2a3127); border-bottom: 2px solid #191e17;
++}
++body[data-mode="command"] :is(.view-reading,.view-estimator) :is(textarea,input,select) {
++  color: var(--site-fg); background: #171e17; box-shadow: inset 0 2px 8px #090d0a; border-color: #626a56;
++}
++body[data-mode="command"] :is(.view-reading,.view-estimator) :is(textarea,input)::placeholder { color: #acb0a1; }
++body[data-mode="command"] :is(.view-reading,.view-estimator) :is(.btn,.subtab,.preset,.opt-btn,.conf-btn,.stepper button,.mode-seg button,.band-seg button,.scan-q-btn) {
++  border-radius: 2px; border-color: #666b55; box-shadow: inset 0 1px #ebefd323,0 3px #111710;
++  transition: transform .15s,box-shadow .15s,background .18s,border-color .18s;
++}
++body[data-mode="command"] :is(.view-reading,.view-estimator) :is(.btn,.subtab,.preset,.opt-btn,.conf-btn,.stepper button,.mode-seg button,.band-seg button,.scan-q-btn):active {
++  transform: translateY(2px); box-shadow: inset 0 1px 3px #111710;
++}
++body[data-mode="command"] :is(.view-reading,.view-estimator) .btn-primary {
++  background: #e6dbb8; border-color: #f2e9d1; color: #262b20; box-shadow: inset 0 -3px #b6a780,0 3px #111710;
++}
++body[data-mode="command"] .lab-subnav { margin-bottom: 16px; }
++body[data-mode="command"] :is(.preset.active,.opt-btn.sel,.conf-btn.sel) { border-left: 4px solid var(--site-accent); }
++body[data-mode="command"] .opt-btn.sel .opt-key,
++body[data-mode="command"] .stepbar :is(.step.active,.step.done) i { color: #17271a; }
++body[data-mode="command"] .passage.interactive .sent.sel {
++  background: #375841; box-shadow: 0 2px #122718,0 3px #92b59a; transform: translateY(-1px);
++}
++body[data-mode="command"] :is(.hint-banner p,.lab-warn,.insufficient b,.view-estimator .disclaimer-banner,.view-estimator .disclaimer-banner b) { color: #f3bf94; }
++body[data-mode="command"] .lab-stage { scroll-margin-top: 86px; }
++body[data-mode="command"] .stage-head {
++  min-height: 74px; align-items: center; padding: 8px 12px; border: 1px solid #65664f;
++  background: repeating-linear-gradient(0deg,#d8c8a509 0 1px,transparent 1px 4px),linear-gradient(108deg,#424738,#232b24);
++  box-shadow: inset 0 1px #b9b8945c,0 4px #141b13,0 6px #4f5543;
++}
++body[data-mode="command"] .stage-head h2 { font-size: clamp(19px,2.25vw,28px); }
++body[data-mode="command"] .stage-assembly {
++  position: relative; display: block; flex: 0 0 77px; height: 52px; margin-left: auto;
++  perspective: 320px; transform-style: preserve-3d;
++}
++.stage-assembly i {
++  position: absolute; inset: 8px 5px; border: 1px solid #aca889; border-bottom-width: 4px;
++  border-right-width: 3px; background: repeating-linear-gradient(90deg,#93ac8e24 0 2px,transparent 2px 7px), #384f3c;
++  transform: rotateX(55deg) rotateZ(-24deg) translateZ(var(--plane,0px));
++  animation: cartridge-lock .45s cubic-bezier(.17,.78,.22,1) both;
++}
++.stage-assembly i:nth-child(2) { --plane: 9px; margin: 0 4px; border-color: #9e7959; background: #744f36; animation-delay: .06s; }
++.stage-assembly i:nth-child(3) { --plane: 18px; margin: 1px 10px; border-color: #adbfa7; background: #56725f; animation-delay: .12s; }
++body[data-mode="command"] .stage-head .sh-actions { margin-left: 0; }
++body[data-mode="command"] .stepbar { padding: 5px 3px 8px; }
++body[data-mode="command"] .stepbar .step { border-radius: 3px; box-shadow: inset 0 1px #c0c6a629,0 2px #10160f; }
++body[data-mode="command"] .stepbar .step.active { box-shadow: inset 0 1px #d4e7c45a,0 3px #121f14,0 4px #8ba884; }
++@keyframes cartridge-lock { from { transform: rotateX(55deg) rotateZ(-38deg) translateZ(calc(var(--plane,0px) + 29px)); opacity: .15; } }
++body[data-mode="command"] .lab-stage[data-screen] > :is(.stage-card,.verdict,.hint-stage,.evidence-grid,.fact-list,.advice-card),
++body[data-mode="command"] .view-estimator .section.show,
++body[data-mode="command"] .tool-section.show { animation: arrive-on-rails .38s cubic-bezier(.18,.72,.2,1) both; }
++body[data-mode="command"] .lab-stage[data-screen="result"] :is(.verdict,.evidence-card) { border-top-color: #e4a879; }
++@keyframes arrive-on-rails { from { opacity: .35; transform: perspective(850px) translateY(10px) translateZ(-22px) rotateX(-4deg); } }
++
++body[data-mode="command"] :is(.scan-review,.scan-preview,.verdict,.hint-text,.tool-section,.view-estimator .section) { position: relative; }
++body[data-mode="command"] :is(.scan-review,.scan-preview,.verdict,.hint-text,.tool-section,.view-estimator .section)::after {
++  content: ''; position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit;
++  background: linear-gradient(110deg,transparent 41%,#c4edbc35 49%,#ecffd44d 50%,transparent 58%);
++  background-repeat: no-repeat; background-size: 300% 100%; opacity: 0;
++}
++body[data-mode="command"] :is(.scan-review,.scan-preview):not([hidden])::after,
++body[data-mode="command"] :is(.verdict,.hint-text,.tool-section.show,.view-estimator .section.show)::after {
++  animation: inspect-sweep .66s ease-out both;
++}
++body[data-mode="command"] :is(.tool-section,[data-mod]):has(.tool-status[data-state="loading"]) { border-inline-start: 2px solid #efb28e; }
++body[data-mode="command"] .lab-stage[data-screen="result"] .compare { perspective: 620px; }
++body[data-mode="command"] .lab-stage[data-screen="result"] .cmp-col {
++  box-shadow: 0 4px #111a12,0 5px #536147; animation: reveal-evidence .46s cubic-bezier(.2,.75,.2,1) both;
++}
++body[data-mode="command"] .lab-stage[data-screen="result"] .cmp-col:last-child { animation-delay: .12s; }
++@keyframes inspect-sweep { 0% { background-position: 100% 0; opacity: 0; } 25% { opacity: 1; } 100% { background-position: 0 0; opacity: 0; } }
++@keyframes reveal-evidence { from { transform: translateZ(-50px) rotateY(-14deg); opacity: .25; } }
++
++body[data-mode="command"] .score-dial {
++  display: grid; flex: 0 0 72px; width: 72px; height: 72px; place-items: center; border-radius: 50%;
++  border: 1px solid #7f886f;
++  background: conic-gradient(from 225deg,#b9e5bd 0 var(--score-angle,0deg),#414b3b var(--score-angle,0deg) 270deg,#222720 270deg);
++  box-shadow: inset 0 1px #dfe3bd66,0 4px #141c13,0 6px #6a745b,0 9px 10px #0005;
++  animation: dial-seat .52s ease-out both;
++}
++.score-dial span { width: 52px; height: 52px; border-radius: 50%; background: radial-gradient(circle at 33% 26%,#505e47,#222e23 75%); border: 1px solid #53684e; box-shadow: inset 0 2px #161f15,0 1px #dae5ba42; }
++body[data-mode="command"] .view-estimator .module .m-bar { border-radius: 2px; box-shadow: inset 0 2px 5px #11170e,0 2px #56664a; }
++body[data-mode="command"] .view-estimator .module .m-bar i { border-radius: 2px; box-shadow: inset 0 1px #ebefcd75,inset 0 -3px #263d2d80; }
++@keyframes dial-seat { from { transform: perspective(300px) rotateY(-48deg) scale(.88); opacity: .45; } }
++
++@media (max-width: 560px) {
++  body[data-mode="command"] :is(.workbench-heading,.lab-hero) { grid-template-columns: minmax(0,1fr) 94px; padding-inline: 10px; }
++  body[data-mode="command"] .lab-hero { grid-template-columns: minmax(0,1fr); }
++  body[data-mode="command"] .lab-hero .instrument-window { grid-row: 1; height: 91px; }
++  .instrument-scene { scale: .67; }
++  body[data-mode="command"] .workbench-heading { min-height: 96px; }
++  body[data-mode="command"] .workbench-heading .instrument-window { height: 83px; }
++  body[data-mode="command"] .stage-assembly { flex-basis: 47px; }
++  body[data-mode="command"] .stage-head { gap: 7px; padding-inline: 7px; }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  body[data-mode="command"] :is(.instrument-scene,.instrument-slab,.instrument-lens,.score-dial,.lab-stage *, .view-estimator .section,.tool-section) {
++    animation: none !important; transition: none !important;
++  }
++  body[data-mode="command"] :is(.scan-review,.scan-preview,.verdict,.hint-text,.tool-section,.view-estimator .section)::after { animation: none !important; }
++}

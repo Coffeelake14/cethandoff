@@ -81,7 +81,7 @@ function layoutNodes(width, height, compact) {
   const positions = new Map();
   for (const item of projected) {
     const x = width / 2 + (item.point.x - centerX) * scale * state.zoom;
-    const y = height / 2 + (item.point.y - centerY) * scale * state.zoom;
+    const y = height * (compact ? .45 : .5) + (item.point.y - centerY) * scale * state.zoom;
     positions.set(item.node.id, {
       x, y, side: item.side, item: item.node,
       depthScale: clamp(item.point.depth, .84, 1.12),
@@ -100,6 +100,7 @@ const state = {
   positions: new Map(),
   compact: false,
   flash: null,
+  layerSpread: 0,
 };
 let refs = null;
 let onSelect = () => {};
@@ -109,6 +110,14 @@ let frame = 0;
 let flashTimer = 0;
 let mobileOpen = false;
 let booted = false;
+let layerFrame = 0;
+
+const DECKS = [
+  { size: 1.94, level: 1.32, thickness: .18, finish: 'base' },
+  { size: 1.75, level: 1.17, thickness: .11, finish: 'band' },
+  { size: 1.59, level: 1.00, thickness: .12, finish: 'steel' },
+  { size: 1.38, level: .83, thickness: .13, finish: 'glass' },
+];
 
 function wireSphere(core, radius) {
   const parallels = [-60, -30, 0, 30, 60].map(latitude => ({ latitude }));
@@ -139,7 +148,7 @@ function wireSphere(core, radius) {
   return `<path class="orbit-mesh-back" d="${paths.far}"/><path class="orbit-mesh-front" d="${paths.near}"/>`;
 }
 
-function projectionPlane(width, height, core, radius) {
+function projectionPlane(width, height) {
   const horizon = height * .51 + state.pitch * .85;
   const vanishingX = width / 2 + state.yaw * 4;
   const grid = [];
@@ -151,17 +160,60 @@ function projectionPlane(width, height, core, radius) {
     const y = horizon + (height - horizon) * (index / 12) ** 1.9;
     grid.push(`M0 ${y.toFixed(1)}H${width}`);
   }
-  const baseY = core.y + radius * .8;
-  return `<path class="field-plane" d="${grid.join('')}"/>
-    <ellipse class="projection-base" cx="${core.x}" cy="${baseY}" rx="${radius * 1.4}" ry="${radius * .25}"/>
-    <ellipse class="projection-base-inner" cx="${core.x}" cy="${baseY}" rx="${radius * 1.15}" ry="${radius * .19}"/>`;
+  return `<path class="field-plane" d="${grid.join('')}"/>`;
+}
+
+function machinePoint(core, x, y, z) {
+  const view = project({ x, y, z }, 12 + state.yaw, -29 + state.pitch);
+  return { x: core.x + view.x, y: core.y + view.y, depth: view.depth };
+}
+
+const coordinates = points => points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+function machineDeck(core, radius, deck, index) {
+  const level = radius * (deck.level - state.layerSpread * index * .205);
+  const span = radius * deck.size;
+  const contour = Array.from({ length: 8 }, (_, side) => {
+    const angle = (side + .5) * Math.PI / 4;
+    return { x: Math.cos(angle) * span, z: Math.sin(angle) * span * .78 };
+  });
+  const ring = (height, scale = 1) => contour.map(({ x, z }) => machinePoint(core, x * scale, height, z * scale));
+  const top = ring(level);
+  const bottom = ring(level + radius * deck.thickness);
+  const faceDepth = machinePoint(core, 0, level, 0).depth;
+  const walls = top.flatMap((corner, side) => {
+    const next = (side + 1) % top.length;
+    if ((corner.depth + top[next].depth) / 2 <= faceDepth) return [];
+    return `<polygon class="deck-wall" points="${coordinates([corner, top[next], bottom[next], bottom[side]])}"/>`;
+  }).join('');
+  const screws = ring(level - 1, .9).map(p => `<circle class="deck-fastener" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.7"/>`).join('');
+  return `<g class="machine-deck deck-${deck.finish}">${walls}
+    <polygon class="deck-top" points="${coordinates(top)}"/>
+    <polygon class="deck-inlay" points="${coordinates(ring(level - 1, .86))}"/>
+    ${screws}</g>`;
+}
+
+function gimbal(core, radius) {
+  const sections = [[-.52, .92], [1.14, 2.58], [2.84, 4.11], [4.39, 5.46]];
+  const points = (start, end, size) => Array.from({ length: 13 }, (_, index) => {
+    const angle = start + (end - start) * index / 12;
+    const x = Math.cos(angle) * size;
+    const z = Math.sin(angle) * size;
+    return machinePoint(core, x, x * -.22 + z * .48, z);
+  });
+  return sections.map(([start, end]) => {
+    const outer = points(start, end, radius * 1.37);
+    const inner = points(end, start, radius * 1.28);
+    return `<polygon class="gimbal-segment" points="${coordinates([...outer, ...inner])}"/>`;
+  }).join('');
 }
 
 function sceneryHtml(width, height, positions) {
   const core = positions.get('reading') || { x: width / 2, y: height / 2 };
   const rx = Math.max(80, Math.min(width * .38, 375));
   const ry = Math.max(70, Math.min(height * .39, 190));
-  const radius = Math.min(width, height) * .25;
+  const radius = Math.min(width, height) * .235;
+  const deckRadius = state.compact ? radius * .9 : radius;
   const ringCenter = `${core.x}px ${core.y}px`;
   let ticks = '';
   for (let index = 0; index < 28; index++) {
@@ -171,30 +223,22 @@ function sceneryHtml(width, height, positions) {
     const length = index % 7 === 0 ? 7 : 3;
     ticks += `<line class="orbit-tick" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - Math.cos(angle) * length).toFixed(1)}" y2="${(y - Math.sin(angle) * length).toFixed(1)}"/>`;
   }
-  let seed = 29;
-  let stars = '';
-  for (let index = 0; index < 24; index++) {
-    seed = (seed * 9301 + 49297) % 233280;
-    const x = 12 + (seed / 233280) * (width - 24);
-    seed = (seed * 9301 + 49297) % 233280;
-    const y = 12 + (seed / 233280) * (height - 24);
-    const radius = index % 6 === 0 ? 1.25 : .75;
-    stars += `<circle class="orbit-star" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius}"/>`;
-  }
+  const decks = DECKS.map((deck, index) => machineDeck(core, deckRadius, deck, index)).join('');
   return `<defs><radialGradient id="commandCoreGlow"><stop offset="0" stop-color="#1c94a5" stop-opacity=".34"/><stop offset="1" stop-color="#1c94a5" stop-opacity="0"/></radialGradient>
-    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#53bed1" stop-opacity=".06"/><stop offset="1" stop-color="#65b1d3" stop-opacity=".3"/></linearGradient></defs>
+    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#8dabae" stop-opacity=".03"/><stop offset="1" stop-color="#9eb4a9" stop-opacity=".22"/></linearGradient>
+    <linearGradient id="deckSteel" x2="1" y2="1"><stop offset="0" stop-color="#6f7773"/><stop offset=".45" stop-color="#343d3e"/><stop offset="1" stop-color="#20262b"/></linearGradient>
+    <linearGradient id="deckGlass" x2="1" y2="1"><stop offset="0" stop-color="#76a8a0" stop-opacity=".64"/><stop offset="1" stop-color="#29494c" stop-opacity=".85"/></linearGradient></defs>
     <g>
-      ${projectionPlane(width, height, core, radius)}
-      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.75}"/>
+      ${projectionPlane(width, height)}
+      <ellipse class="machine-shadow" cx="${core.x}" cy="${core.y + deckRadius * 1.37}" rx="${deckRadius * 1.92}" ry="${deckRadius * .61}"/>
+      ${decks}
+      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.65}"/>
       <ellipse class="orbit-ring" cx="${core.x}" cy="${core.y}" rx="${rx}" ry="${ry}"/>
-      <ellipse class="orbit-ring is-mid" cx="${core.x}" cy="${core.y}" rx="${rx * .72}" ry="${ry * .7}"/>
-      <ellipse class="orbit-ring is-far" cx="${core.x}" cy="${core.y}" rx="${rx * .74}" ry="${ry * .22}" transform="rotate(-21 ${core.x} ${core.y})"/>
       <path class="orbit-axis" d="M${core.x} ${Math.max(8, core.y - ry * 1.12)}V${Math.min(height - 8, core.y + ry * 1.12)}M${Math.max(8, core.x - rx * 1.08)} ${core.y}H${Math.min(width - 8, core.x + rx * 1.08)}"/>
       <g class="orbit-mesh">${wireSphere(core, radius)}</g>
-      <circle class="orbit-instrument" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}"/>
+      ${gimbal(core, radius)}
       <circle class="orbit-sweep" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}" pathLength="100" style="transform-origin:${ringCenter}"/>
       ${ticks}
-      ${stars}
     </g>`;
 }
 
@@ -384,8 +428,33 @@ function setZoom(next) {
   renderGraph();
 }
 
+function setLayerButton(expanded) {
+  refs.layers.setAttribute('aria-pressed', String(expanded));
+  refs.layers.textContent = expanded ? '收拢分层' : '展开分层';
+}
+
+function toggleLayers() {
+  const expanded = refs.layers.getAttribute('aria-pressed') !== 'true';
+  setLayerButton(expanded);
+  cancelAnimationFrame(layerFrame);
+  const target = Number(expanded);
+  const start = state.layerSpread;
+  const started = performance.now();
+  const paint = now => {
+    const progress = reducedMotion.matches ? 1 : Math.min(1, (now - started) / 340);
+    state.layerSpread = start + (target - start) * (1 - (1 - progress) ** 3);
+    const { width, height } = refs.viewport.getBoundingClientRect();
+    if (width && height) refs.scenery.innerHTML = sceneryHtml(width, height, state.positions);
+    if (progress < 1) layerFrame = requestAnimationFrame(paint);
+  };
+  layerFrame = requestAnimationFrame(paint);
+}
+
 function resetView() {
   stopRelease();
+  cancelAnimationFrame(layerFrame);
+  state.layerSpread = 0;
+  setLayerButton(false);
   state.zoom = 1;
   state.yaw = 0;
   state.pitch = 0;
@@ -420,6 +489,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
     mobileList: document.getElementById('commandMobileNodes'),
     allNodes: document.getElementById('commandAllNodes'),
     allNodeCount: document.getElementById('commandAllNodeCount'),
+    layers: document.getElementById('graphLayers'),
   };
   const select = event => {
     const button = event.target.closest('[data-node]');
@@ -434,6 +504,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
   document.getElementById('graphZoomIn').addEventListener('click', () => setZoom(state.zoom + .1));
   document.getElementById('graphZoomOut').addEventListener('click', () => setZoom(state.zoom - .1));
   document.getElementById('graphReset').addEventListener('click', resetView);
+  refs.layers.addEventListener('click', toggleLayers);
 
   refs.viewport.addEventListener('pointerdown', event => {
     if (event.target.closest('button') || event.button !== 0) return;

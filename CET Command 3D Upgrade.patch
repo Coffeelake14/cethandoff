@@ -1,0 +1,572 @@
+diff --git a/cet-studyhack-command-edition/dev/accept-command.mjs b/cet-studyhack-command-edition/dev/accept-command.mjs
+index 4e0db2b..eb8d558 100644
+--- a/cet-studyhack-command-edition/dev/accept-command.mjs
++++ b/cet-studyhack-command-edition/dev/accept-command.mjs
+@@ -120,7 +120,7 @@ try {
+   await navigate();
+ 
+   check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command'`), 'command center opens by default');
+-  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(7, 17, 31)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(13, 25, 41)'`), 'command center uses dark mission surface');
++  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(18, 21, 19)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(32, 35, 34)'`), 'command center uses dark graphite surfaces');
+   check(await evaluate(`!document.querySelector('.tabnav').getClientRects().length && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'simple-mode tabs stay out of command center');
+   check((await metrics()).every(text => text.includes('—') && text.includes('待练习')), 'zero metrics show pending');
+   check(JSON.stringify(await radarValues()) === JSON.stringify(['—', '—', '—', '—', '—']) && await evaluate(`document.querySelectorAll('#commandRadar .radar-point.is-pending').length === 5 && !document.querySelector('#commandRadar .radar-shape')`), 'five radar axes distinguish missing samples');
+@@ -225,6 +225,15 @@ try {
+   await evaluate(`scrollTo({top:0,behavior:'instant'})`);
+   await delay(900);
+   const radarShot = await screenshot('command-radar.png');
++  const deckTop = () => evaluate(`document.querySelector('.deck-glass .deck-top').getBoundingClientRect().top`);
++  const assembled = await deckTop();
++  await click('#graphLayers');
++  await delay(410);
++  check(await evaluate(`document.querySelectorAll('.machine-deck').length === 4 && document.getElementById('graphLayers').getAttribute('aria-pressed') === 'true'`) && (await deckTop()) < assembled - 25, 'the section view lifts the upper decks');
++  await evaluate(`scrollTo({top:0,behavior:'instant'})`);
++  const layersShot = await screenshot('command-layers.png');
++  await click('#graphReset');
++  check(Math.abs((await deckTop()) - assembled) < 2 && await evaluate(`document.getElementById('graphLayers').getAttribute('aria-pressed') === 'false'`), 'reset restores the assembled deck');
+   check(await evaluate(`document.querySelector('.monitor-count').textContent === '1'`), 'transfer does not inflate main error count');
+   await click('#commandReturn');
+   await click('[data-act="summary"]');
+@@ -291,6 +300,7 @@ try {
+   check(JSON.stringify(mobileGraph.ids) === JSON.stringify(['attitude_shift','causal_inversion','reading','scope_expansion']) && mobileGraph.items.every(item => item.left >= mobileGraph.viewport.left - 1 && item.right <= mobileGraph.viewport.right + 1 && item.top >= mobileGraph.viewport.top - 1 && item.bottom <= mobileGraph.viewport.bottom + 1), '390 graph labels stay inside viewport', JSON.stringify(mobileGraph));
+   check(await evaluate(`document.getElementById('commandMobileNodes').hidden && document.getElementById('commandAllNodes').getAttribute('aria-expanded') === 'false'`), '390 extra causes start collapsed');
+   const mobileShot = await screenshot('command-mobile.png');
++  check(await evaluate(`(() => { const deck = document.querySelector('.deck-base').getBoundingClientRect(), frame = document.querySelector('.graph-viewport').getBoundingClientRect(); return deck.left >= frame.left && deck.right <= frame.right && deck.bottom <= frame.bottom; })()`), 'the full 3D base fits a compact viewport');
+   const mobileAxes = await evaluate(`[...document.querySelectorAll('#commandRadar .radar-axis')].map(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right}))`);
+   check(mobileAxes.length === 5 && mobileAxes.every(axis => axis.left >= 0 && axis.right <= 390), 'mobile radar keeps all five axes in view', JSON.stringify(mobileAxes));
+   await evaluate(`document.querySelector('#commandPerformanceTitle').scrollIntoView({block:'center',behavior:'instant'})`);
+@@ -365,7 +375,7 @@ try {
+   check(await evaluate(`getComputedStyle(document.querySelector('.graph-node')).animationName === 'none' && getComputedStyle(document.querySelector('.graph-node')).transitionDuration === '0s'`), 'reduced motion removes graph animation');
+   check(exceptions.length === 0, 'no browser runtime exceptions', exceptions.join('; '));
+ 
+-  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, exceptions }, null, 2));
++  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, layersShot, exceptions }, null, 2));
+ } finally {
+   ws?.close();
+   browser.kill();
+diff --git a/cet-studyhack-command-edition/web/command-graph.js b/cet-studyhack-command-edition/web/command-graph.js
+index 9131d63..1144ca7 100644
+--- a/cet-studyhack-command-edition/web/command-graph.js
++++ b/cet-studyhack-command-edition/web/command-graph.js
+@@ -81,7 +81,7 @@ function layoutNodes(width, height, compact) {
+   const positions = new Map();
+   for (const item of projected) {
+     const x = width / 2 + (item.point.x - centerX) * scale * state.zoom;
+-    const y = height / 2 + (item.point.y - centerY) * scale * state.zoom;
++    const y = height * (compact ? .45 : .5) + (item.point.y - centerY) * scale * state.zoom;
+     positions.set(item.node.id, {
+       x, y, side: item.side, item: item.node,
+       depthScale: clamp(item.point.depth, .84, 1.12),
+@@ -100,6 +100,7 @@ const state = {
+   positions: new Map(),
+   compact: false,
+   flash: null,
++  layerSpread: 0,
+ };
+ let refs = null;
+ let onSelect = () => {};
+@@ -109,6 +110,14 @@ let frame = 0;
+ let flashTimer = 0;
+ let mobileOpen = false;
+ let booted = false;
++let layerFrame = 0;
++
++const DECKS = [
++  { size: 1.94, level: 1.32, thickness: .18, finish: 'base' },
++  { size: 1.75, level: 1.17, thickness: .11, finish: 'band' },
++  { size: 1.59, level: 1.00, thickness: .12, finish: 'steel' },
++  { size: 1.38, level: .83, thickness: .13, finish: 'glass' },
++];
+ 
+ function wireSphere(core, radius) {
+   const parallels = [-60, -30, 0, 30, 60].map(latitude => ({ latitude }));
+@@ -139,7 +148,7 @@ function wireSphere(core, radius) {
+   return `<path class="orbit-mesh-back" d="${paths.far}"/><path class="orbit-mesh-front" d="${paths.near}"/>`;
+ }
+ 
+-function projectionPlane(width, height, core, radius) {
++function projectionPlane(width, height) {
+   const horizon = height * .51 + state.pitch * .85;
+   const vanishingX = width / 2 + state.yaw * 4;
+   const grid = [];
+@@ -151,17 +160,60 @@ function projectionPlane(width, height, core, radius) {
+     const y = horizon + (height - horizon) * (index / 12) ** 1.9;
+     grid.push(`M0 ${y.toFixed(1)}H${width}`);
+   }
+-  const baseY = core.y + radius * .8;
+-  return `<path class="field-plane" d="${grid.join('')}"/>
+-    <ellipse class="projection-base" cx="${core.x}" cy="${baseY}" rx="${radius * 1.4}" ry="${radius * .25}"/>
+-    <ellipse class="projection-base-inner" cx="${core.x}" cy="${baseY}" rx="${radius * 1.15}" ry="${radius * .19}"/>`;
++  return `<path class="field-plane" d="${grid.join('')}"/>`;
++}
++
++function machinePoint(core, x, y, z) {
++  const view = project({ x, y, z }, 12 + state.yaw, -29 + state.pitch);
++  return { x: core.x + view.x, y: core.y + view.y, depth: view.depth };
++}
++
++const coordinates = points => points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
++
++function machineDeck(core, radius, deck, index) {
++  const level = radius * (deck.level - state.layerSpread * index * .205);
++  const span = radius * deck.size;
++  const contour = Array.from({ length: 8 }, (_, side) => {
++    const angle = (side + .5) * Math.PI / 4;
++    return { x: Math.cos(angle) * span, z: Math.sin(angle) * span * .78 };
++  });
++  const ring = (height, scale = 1) => contour.map(({ x, z }) => machinePoint(core, x * scale, height, z * scale));
++  const top = ring(level);
++  const bottom = ring(level + radius * deck.thickness);
++  const faceDepth = machinePoint(core, 0, level, 0).depth;
++  const walls = top.flatMap((corner, side) => {
++    const next = (side + 1) % top.length;
++    if ((corner.depth + top[next].depth) / 2 <= faceDepth) return [];
++    return `<polygon class="deck-wall" points="${coordinates([corner, top[next], bottom[next], bottom[side]])}"/>`;
++  }).join('');
++  const screws = ring(level - 1, .9).map(p => `<circle class="deck-fastener" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="1.7"/>`).join('');
++  return `<g class="machine-deck deck-${deck.finish}">${walls}
++    <polygon class="deck-top" points="${coordinates(top)}"/>
++    <polygon class="deck-inlay" points="${coordinates(ring(level - 1, .86))}"/>
++    ${screws}</g>`;
++}
++
++function gimbal(core, radius) {
++  const sections = [[-.52, .92], [1.14, 2.58], [2.84, 4.11], [4.39, 5.46]];
++  const points = (start, end, size) => Array.from({ length: 13 }, (_, index) => {
++    const angle = start + (end - start) * index / 12;
++    const x = Math.cos(angle) * size;
++    const z = Math.sin(angle) * size;
++    return machinePoint(core, x, x * -.22 + z * .48, z);
++  });
++  return sections.map(([start, end]) => {
++    const outer = points(start, end, radius * 1.37);
++    const inner = points(end, start, radius * 1.28);
++    return `<polygon class="gimbal-segment" points="${coordinates([...outer, ...inner])}"/>`;
++  }).join('');
+ }
+ 
+ function sceneryHtml(width, height, positions) {
+   const core = positions.get('reading') || { x: width / 2, y: height / 2 };
+   const rx = Math.max(80, Math.min(width * .38, 375));
+   const ry = Math.max(70, Math.min(height * .39, 190));
+-  const radius = Math.min(width, height) * .25;
++  const radius = Math.min(width, height) * .235;
++  const deckRadius = state.compact ? radius * .9 : radius;
+   const ringCenter = `${core.x}px ${core.y}px`;
+   let ticks = '';
+   for (let index = 0; index < 28; index++) {
+@@ -171,30 +223,22 @@ function sceneryHtml(width, height, positions) {
+     const length = index % 7 === 0 ? 7 : 3;
+     ticks += `<line class="orbit-tick" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x - Math.cos(angle) * length).toFixed(1)}" y2="${(y - Math.sin(angle) * length).toFixed(1)}"/>`;
+   }
+-  let seed = 29;
+-  let stars = '';
+-  for (let index = 0; index < 24; index++) {
+-    seed = (seed * 9301 + 49297) % 233280;
+-    const x = 12 + (seed / 233280) * (width - 24);
+-    seed = (seed * 9301 + 49297) % 233280;
+-    const y = 12 + (seed / 233280) * (height - 24);
+-    const radius = index % 6 === 0 ? 1.25 : .75;
+-    stars += `<circle class="orbit-star" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius}"/>`;
+-  }
++  const decks = DECKS.map((deck, index) => machineDeck(core, deckRadius, deck, index)).join('');
+   return `<defs><radialGradient id="commandCoreGlow"><stop offset="0" stop-color="#1c94a5" stop-opacity=".34"/><stop offset="1" stop-color="#1c94a5" stop-opacity="0"/></radialGradient>
+-    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#53bed1" stop-opacity=".06"/><stop offset="1" stop-color="#65b1d3" stop-opacity=".3"/></linearGradient></defs>
++    <linearGradient id="commandPlaneLight" x2="0" y2="1"><stop offset="0" stop-color="#8dabae" stop-opacity=".03"/><stop offset="1" stop-color="#9eb4a9" stop-opacity=".22"/></linearGradient>
++    <linearGradient id="deckSteel" x2="1" y2="1"><stop offset="0" stop-color="#6f7773"/><stop offset=".45" stop-color="#343d3e"/><stop offset="1" stop-color="#20262b"/></linearGradient>
++    <linearGradient id="deckGlass" x2="1" y2="1"><stop offset="0" stop-color="#76a8a0" stop-opacity=".64"/><stop offset="1" stop-color="#29494c" stop-opacity=".85"/></linearGradient></defs>
+     <g>
+-      ${projectionPlane(width, height, core, radius)}
+-      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.75}"/>
++      ${projectionPlane(width, height)}
++      <ellipse class="machine-shadow" cx="${core.x}" cy="${core.y + deckRadius * 1.37}" rx="${deckRadius * 1.92}" ry="${deckRadius * .61}"/>
++      ${decks}
++      <circle class="core-glow" cx="${core.x}" cy="${core.y}" r="${radius * 1.65}"/>
+       <ellipse class="orbit-ring" cx="${core.x}" cy="${core.y}" rx="${rx}" ry="${ry}"/>
+-      <ellipse class="orbit-ring is-mid" cx="${core.x}" cy="${core.y}" rx="${rx * .72}" ry="${ry * .7}"/>
+-      <ellipse class="orbit-ring is-far" cx="${core.x}" cy="${core.y}" rx="${rx * .74}" ry="${ry * .22}" transform="rotate(-21 ${core.x} ${core.y})"/>
+       <path class="orbit-axis" d="M${core.x} ${Math.max(8, core.y - ry * 1.12)}V${Math.min(height - 8, core.y + ry * 1.12)}M${Math.max(8, core.x - rx * 1.08)} ${core.y}H${Math.min(width - 8, core.x + rx * 1.08)}"/>
+       <g class="orbit-mesh">${wireSphere(core, radius)}</g>
+-      <circle class="orbit-instrument" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}"/>
++      ${gimbal(core, radius)}
+       <circle class="orbit-sweep" cx="${core.x}" cy="${core.y}" r="${radius * 1.19}" pathLength="100" style="transform-origin:${ringCenter}"/>
+       ${ticks}
+-      ${stars}
+     </g>`;
+ }
+ 
+@@ -384,8 +428,33 @@ function setZoom(next) {
+   renderGraph();
+ }
+ 
++function setLayerButton(expanded) {
++  refs.layers.setAttribute('aria-pressed', String(expanded));
++  refs.layers.textContent = expanded ? '收拢分层' : '展开分层';
++}
++
++function toggleLayers() {
++  const expanded = refs.layers.getAttribute('aria-pressed') !== 'true';
++  setLayerButton(expanded);
++  cancelAnimationFrame(layerFrame);
++  const target = Number(expanded);
++  const start = state.layerSpread;
++  const started = performance.now();
++  const paint = now => {
++    const progress = reducedMotion.matches ? 1 : Math.min(1, (now - started) / 340);
++    state.layerSpread = start + (target - start) * (1 - (1 - progress) ** 3);
++    const { width, height } = refs.viewport.getBoundingClientRect();
++    if (width && height) refs.scenery.innerHTML = sceneryHtml(width, height, state.positions);
++    if (progress < 1) layerFrame = requestAnimationFrame(paint);
++  };
++  layerFrame = requestAnimationFrame(paint);
++}
++
+ function resetView() {
+   stopRelease();
++  cancelAnimationFrame(layerFrame);
++  state.layerSpread = 0;
++  setLayerButton(false);
+   state.zoom = 1;
+   state.yaw = 0;
+   state.pitch = 0;
+@@ -420,6 +489,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
+     mobileList: document.getElementById('commandMobileNodes'),
+     allNodes: document.getElementById('commandAllNodes'),
+     allNodeCount: document.getElementById('commandAllNodeCount'),
++    layers: document.getElementById('graphLayers'),
+   };
+   const select = event => {
+     const button = event.target.closest('[data-node]');
+@@ -434,6 +504,7 @@ export function initCommandGraph({ onSelect: selectCallback }) {
+   document.getElementById('graphZoomIn').addEventListener('click', () => setZoom(state.zoom + .1));
+   document.getElementById('graphZoomOut').addEventListener('click', () => setZoom(state.zoom - .1));
+   document.getElementById('graphReset').addEventListener('click', resetView);
++  refs.layers.addEventListener('click', toggleLayers);
+ 
+   refs.viewport.addEventListener('pointerdown', event => {
+     if (event.target.closest('button') || event.button !== 0) return;
+diff --git a/cet-studyhack-command-edition/web/command-radar.css b/cet-studyhack-command-edition/web/command-radar.css
+index 03e73f4..faccb31 100644
+--- a/cet-studyhack-command-edition/web/command-radar.css
++++ b/cet-studyhack-command-edition/web/command-radar.css
+@@ -1,4 +1,4 @@
+-.command-radar { padding: 1px 14px 12px; }
++.command-radar { padding: 9px 14px 12px; }
+ 
+ .radar-board {
+   position: relative;
+@@ -7,14 +7,17 @@
+   margin-inline: auto;
+   aspect-ratio: 300 / 247;
+   isolation: isolate;
+-  background: radial-gradient(ellipse at 50% 50%, #1a394877, transparent 67%);
++  background: radial-gradient(ellipse at 50% 48%, #2d4235, #222b23 44%, #151a15 100%);
++  border: 1px solid #626351;
++  border-bottom-color: #86816b;
++  box-shadow: inset 0 1px 9px #060a06d9, 0 3px #10150f;
+ }
+ 
+ .radar-plot { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+ .radar-dial, .radar-grid, .radar-spoke { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
+-.radar-dial { stroke: #5790a43b; stroke-dasharray: 1 5; }
+-.radar-grid { stroke: #5f91a440; }
+-.radar-spoke { stroke: #42647b; }
++.radar-dial { stroke: #a1ad8c64; stroke-dasharray: 1 5; }
++.radar-grid { stroke: #8ea78557; }
++.radar-spoke { stroke: #627a62; }
+ .radar-spoke.is-active { stroke: #7cdfdb; stroke-width: 1.5; }
+ .radar-edge, .radar-shape { stroke: #a3f1e7; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+ .radar-edge { fill: none; }
+@@ -27,21 +30,21 @@
+   position: absolute; z-index: 1; left: var(--axis-x); top: var(--axis-y);
+   display: grid; place-items: center; align-content: center; min-width: 44px; min-height: 44px;
+   transform: translate(-50%, -50%); padding: 3px 4px; border: 1px solid transparent;
+-  border-radius: 3px; background: transparent; color: #c2d4de; cursor: pointer;
++  border-radius: 2px; background: transparent; color: #deded0; cursor: pointer;
+   font-size: 11px; line-height: 1.22; white-space: nowrap;
+   transition: color .16s, background .16s, border-color .16s;
+ }
+ .radar-axis b { color: #a2d8d5; margin-top: 1px; font: 700 11px/1.15 ui-monospace, Consolas, monospace; }
+ .radar-axis[data-samples="0"] b { color: #8598ad; }
+-.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #ebfffd; border-color: #64b6b670; background: #122b3996; }
++.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #f7f3e4; border-color: #b6ab8970; background: #2c3626bd; }
+ .radar-readout {
+   display: flex; justify-content: space-between; align-items: center; gap: 8px;
+-  padding: 10px 12px; min-height: 58px; border: 1px solid #395466;
+-  border-left: 2px solid #7de2da; background: #091724;
++  margin-top: 9px; padding: 10px 12px; min-height: 58px; border: 1px solid #4a5143;
++  border-left: 2px solid #a2bc98; background: #191f18; box-shadow: inset 0 2px 6px #0e140f;
+ }
+ .radar-readout > div { display: grid; gap: 2px; }
+-.radar-caption { color: #e6f0f7; font-size: 12px; }
+-.radar-sample { color: #a4b9c9; font-size: 10px; }
++.radar-caption { color: #e9e7d7; font-size: 12px; }
++.radar-sample { color: #b9c0ab; font-size: 10px; }
+ .radar-value { color: #c7f6ed; font: 700 20px/1 ui-monospace, Consolas, monospace; white-space: nowrap; }
+ 
+ @media (max-width: 767px) {
+diff --git a/cet-studyhack-command-edition/web/command.css b/cet-studyhack-command-edition/web/command.css
+index 6be11de..c45bc8f 100644
+--- a/cet-studyhack-command-edition/web/command.css
++++ b/cet-studyhack-command-edition/web/command.css
+@@ -1,12 +1,12 @@
+-body[data-view="command"] {
+-  --command-bg: #07111f;
+-  --command-surface: #0d1929;
+-  --command-text: #e7effa;
+-  --command-muted: #a6b8cd;
+-  --command-border: #25354b;
+-  --command-cyan: #37d9e8;
+-  --command-amber: #f2b35d;
+-  --command-green: #42d5a1;
++body[data-view="command"], .view-command {
++  --command-bg: #121513;
++  --command-surface: #202322;
++  --command-text: #f2eee2;
++  --command-muted: #bcbab0;
++  --command-border: #3a403b;
++  --command-cyan: #a2e0d2;
++  --command-amber: #eea16e;
++  --command-green: #81c9a2;
+   --command-purple: #a18bfa;
+   color: var(--command-text);
+   background-color: var(--command-bg);
+@@ -16,14 +16,14 @@ body[data-view="command"] .wrap { max-width: 1720px; --gap: 18px; }
+ body[data-mode="command"] .tabnav { display: none; }
+ body[data-view="command"] .bg {
+   background-color: var(--command-bg);
+-  background-image: radial-gradient(ellipse at 50% 6%, #1f3749 0%, transparent 57%);
++  background-image: radial-gradient(ellipse at 38% 0%, #3b3931 0%, transparent 62%);
+ }
+ body[data-view="command"] .bg .orb { display: none; }
+-body[data-view="command"] .header { background: rgba(7, 17, 31, .94); border-color: var(--command-border); }
++body[data-view="command"] .header { background: #141715f5; border-color: #4a4940; }
+ body[data-view="command"] .brand .titles h1 { color: var(--command-text); }
+ body[data-view="command"] .brand .titles .sub { color: var(--command-muted); }
+-body[data-view="command"] .brand .logo { background: #152837; color: var(--command-cyan); box-shadow: none; border: 1px solid #335360; border-radius: 3px; }
+-body[data-view="command"] .status-pill { color: var(--command-muted); background: #0b1727; border-color: var(--command-border); }
++body[data-view="command"] .brand .logo { background: #272923; color: var(--command-text); box-shadow: inset 0 1px #666255; border: 1px solid #545548; border-radius: 2px; }
++body[data-view="command"] .status-pill { color: var(--command-muted); background: #1c211c; border-color: var(--command-border); }
+ body[data-view="command"] .status-pill[data-state="ready"] { color: var(--command-green); }
+ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: var(--command-green); box-shadow: 0 0 0 4px rgba(66, 213, 161, .1); }
+ 
+@@ -38,18 +38,6 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .command-return svg { width: 16px; height: 16px; transform: rotate(180deg); }
+ .command-return:hover { color: var(--command-cyan); border-color: var(--command-cyan); }
+ 
+-.view-command {
+-  --command-bg: #07111f;
+-  --command-surface: #0d1929;
+-  --command-text: #e7effa;
+-  --command-muted: #a6b8cd;
+-  --command-border: #25354b;
+-  --command-cyan: #37d9e8;
+-  --command-amber: #f2b35d;
+-  --command-green: #42d5a1;
+-  --command-purple: #a18bfa;
+-  color: var(--command-text);
+-}
+ .view-command * { box-sizing: border-box; }
+ .view-command button { font: inherit; }
+ .view-command button:focus-visible, .command-return:focus-visible { outline: 2px solid var(--command-cyan); outline-offset: 3px; }
+@@ -57,20 +45,21 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .command-shell { max-width: 1720px; margin: 0 auto; }
+ .command-console {
+   overflow: hidden;
+-  border: 1px solid #425b6d;
+-  border-radius: 3px;
++  border: 1px solid #726f62;
++  border-radius: 2px;
+   background: var(--command-surface);
+-  box-shadow: 0 20px 55px #02060b80;
++  box-shadow: 0 3px 0 #222623, 0 7px 0 #121513, 0 23px 38px #0305039e;
+ }
+ .command-toolbar {
+   min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 22px;
+-  padding: 10px 20px; border-bottom: 1px solid #3d5365;
+-  background: linear-gradient(108deg, #213545 0%, #142433 46%, #0c1a28 100%);
++  padding: 10px 20px; border-bottom: 1px solid #57574b;
++  box-shadow: inset 0 1px #8d897371, inset 0 -3px #171916;
++  background: repeating-linear-gradient(0deg, #e2d7bc08 0 1px, transparent 1px 4px), linear-gradient(108deg, #3e4037 0%, #292c27 48%, #202522 100%);
+ }
+-.command-context { min-width: 0; border-left: 3px solid var(--command-cyan); padding-left: 12px; }
++.command-context { min-width: 0; border-left: 4px solid #c28461; padding-left: 13px; }
+ .command-context h2 {
+-  margin: 0; color: #ecf8fc; font-size: clamp(24px, 2.7vw, 37px);
+-  font-weight: 800; letter-spacing: .065em; line-height: 1.15;
++  margin: 0; color: var(--command-text); font-size: clamp(26px, 3vw, 42px);
++  font-weight: 800; letter-spacing: .045em; line-height: 1.08;
+ }
+ .command-action { display: flex; align-items: center; gap: 14px; min-width: 0; }
+ .command-action-copy { min-width: 0; text-align: right; }
+@@ -81,8 +70,9 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ .command-primary {
+   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+-  min-height: 46px; padding: 0 16px; color: #10202d; border-color: #d0e6e7;
+-  background: #d0e6e7; font-size: 12px; font-weight: 800; white-space: nowrap;
++  min-height: 46px; padding: 0 16px; color: #22231c; border-color: #f0e6ca;
++  background: #e8ddbf; box-shadow: inset 0 -3px #bdad85, 0 2px #101311;
++  font-size: 12px; font-weight: 800; white-space: nowrap;
+ }
+ .command-primary:hover { filter: brightness(1.08); }
+ .command-primary svg { width: 18px; height: 18px; flex: 0 0 18px; }
+@@ -95,14 +85,14 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   border-bottom: 1px solid var(--command-border);
+ }
+ .command-panel { position: relative; min-width: 0; }
+-.command-performance { grid-area: performance; border-right: 1px solid var(--command-border); background: linear-gradient(180deg, #112634, #0c1825 81%); }
++.command-performance { grid-area: performance; border-right: 1px solid #55584c; background: linear-gradient(140deg, #2c302a, #1c211d 58%); }
+ .command-graph-panel { grid-area: graph; background: var(--command-bg); }
+-.command-side { grid-area: side; border-left: 1px solid var(--command-border); background: linear-gradient(180deg, #142432, #0c1825 81%); }
++.command-side { grid-area: side; border-left: 1px solid #55584c; background: linear-gradient(155deg, #30312a, #1d221e 58%); }
+ .command-section-head {
+   min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+   padding: 12px 15px; border-bottom: 1px solid var(--command-border);
+ }
+-.command-section-head h3 { margin: 0; font-size: 14px; letter-spacing: .045em; }
++.command-section-head h3 { margin: 0; font-size: 15px; letter-spacing: .035em; }
+ .command-section-head > span, .command-section-head p {
+   margin: 0; color: var(--command-muted); font-size: 10px; line-height: 1.5;
+ }
+@@ -127,23 +117,25 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   color: var(--command-amber); background: rgba(242, 179, 93, .06); font-size: 10px;
+ }
+ 
+-.command-graph-head { background: #0a1826; }
++.command-graph-head { background: #1b211e; box-shadow: inset 0 -3px #101512; }
+ .command-graph-head > div:first-child { min-width: 0; }
+ .command-graph-head p { max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .graph-controls { display: flex; gap: 4px; flex: 0 0 auto; }
+ .graph-controls button {
+   min-width: 44px; min-height: 44px; padding: 0 9px;
+-  color: var(--command-muted); background: #0a1625; font-size: 15px;
++  color: var(--command-text); background: #2a2f29; font-size: 15px;
++  box-shadow: inset 0 1px #ffffff1c, inset 0 -2px #101510;
+ }
+ .graph-controls button:hover { color: var(--command-cyan); border-color: var(--command-cyan); }
+ 
+ .graph-viewport {
+   position: relative; height: clamp(420px, 48vh, 480px); overflow: hidden;
+   background:
+-    radial-gradient(ellipse at 50% 40%, #103647 0%, transparent 65%),
+-    linear-gradient(#699ca015 1px, transparent 1px),
+-    linear-gradient(90deg, #699ca015 1px, transparent 1px), #050e19;
+-  background-size: auto, 32px 32px, 32px 32px, auto;
++    radial-gradient(ellipse at 49% 56%, #243b36 0%, transparent 63%),
++    linear-gradient(#a8af9a11 1px, transparent 1px),
++    linear-gradient(90deg, #a8af9a11 1px, transparent 1px), #111715;
++  background-size: auto, 38px 38px, 38px 38px, auto;
++  box-shadow: inset 0 0 20px #080c0aee, inset 0 4px #0b100d;
+   cursor: grab; touch-action: pan-y;
+ }
+ .graph-viewport::before {
+@@ -172,19 +164,26 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .graph-viewport.dragging .graph-stage { transition: none; }
+ .orbit-map { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+ .orbit-ring { fill: none; stroke: #8eb9c5; stroke-width: .8; stroke-opacity: .26; vector-effect: non-scaling-stroke; stroke-dasharray: 2 5; }
+-.orbit-ring.is-mid { stroke-opacity: .19; stroke-dasharray: none; }
+-.orbit-ring.is-far { stroke-opacity: .29; stroke-dasharray: 10 5 2 5; }
+ .orbit-axis { fill: none; stroke: var(--command-cyan); stroke-width: .7; stroke-opacity: .1; stroke-dasharray: 3 9; }
+ .orbit-tick { stroke: #9dd5d8; stroke-width: 1; stroke-opacity: .43; }
+-.orbit-star { fill: #a6dce3; opacity: .2; }
+ .core-glow { fill: url(#commandCoreGlow); }
+ .field-plane { fill: none; stroke: url(#commandPlaneLight); stroke-width: 1; }
+-.projection-base { fill: #10536318; stroke: #7de0e04d; stroke-width: 1; stroke-dasharray: 1 3; }
+-.projection-base-inner { fill: none; stroke: #458f9c72; stroke-width: 1; }
++.machine-shadow { fill: #020604; opacity: .65; filter: blur(7px); }
++.deck-top, .deck-wall { stroke: #b2a98d83; stroke-width: .85; stroke-linejoin: round; }
++.deck-top { fill: url(#deckSteel); }
++.deck-wall { fill: #26281f; }
++.deck-base .deck-top { fill: #353a30; }
++.deck-base .deck-wall { fill: #1c211a; }
++.deck-band .deck-top { fill: #74604c; }
++.deck-band .deck-wall { fill: #91694d; stroke: #bc9573; }
++.deck-glass .deck-top { fill: url(#deckGlass); stroke: #a1d6c5b5; }
++.deck-glass .deck-wall { fill: #253f3d; stroke: #75aea6bf; }
++.deck-inlay { fill: none; stroke: #ede8cf55; stroke-width: .7; }
++.deck-fastener { fill: #1e241c; stroke: #b9b39c9e; stroke-width: .7; }
++.gimbal-segment { fill: #566762c7; stroke: #a2c7bab5; stroke-width: 1; stroke-linejoin: round; }
+ .orbit-mesh { fill: none; }
+ .orbit-mesh-back { stroke: #5ea5b0; stroke-width: .65; stroke-opacity: .26; }
+-.orbit-mesh-front { stroke: #8ae3e9; stroke-width: .8; stroke-opacity: .64; filter: drop-shadow(0 0 5px #71e3e655); }
+-.orbit-instrument { fill: none; stroke: #83c8d1; stroke-width: 3; stroke-opacity: .37; stroke-dasharray: 2 6 18 6; }
++.orbit-mesh-front { stroke: #a3d9ce; stroke-width: .8; stroke-opacity: .74; }
+ .orbit-sweep {
+   fill: none; stroke: #99f7ef; stroke-width: 2; stroke-dasharray: 9 91; stroke-linecap: round;
+   filter: drop-shadow(0 0 4px #62f3e8a6);
+@@ -286,12 +285,18 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ }
+ 
+ .map-legend {
+-  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; min-height: 31px;
+-  border-top: 1px solid var(--command-border); padding: 3px 13px; color: #a0b4c7; background: #0b1726;
++  display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: center; min-height: 44px;
++  border-top: 1px solid #505347; padding: 3px 10px; color: var(--command-muted); background: #212720;
+   font-size: 10px;
+ }
+ .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+-.map-legend span:last-child { margin-left: auto; }
++.map-hint { margin-left: auto; }
++.view-command #graphLayers {
++  min-height: 36px; padding: 3px 10px; border: 1px solid #656457; border-radius: 2px;
++  background: #353a30; color: #eee8d7; cursor: pointer; box-shadow: inset 0 1px #ffffff22, inset 0 -2px #181c16;
++  font-size: 11px;
++}
++.view-command #graphLayers:hover, .view-command #graphLayers[aria-pressed="true"] { background: #d5d2ad; color: #20271d; border-color: #d5d2ad; }
+ .map-legend i { width: 6px; height: 6px; border: 1px solid #9ab6c9; border-radius: 100%; }
+ .map-legend span:nth-child(2) i { border-color: var(--command-amber); background: var(--command-amber); }
+ 
+@@ -326,7 +331,7 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ .monitor-row.record-flash { animation: row-record .8s ease 1; }
+ .command-empty { display: grid; place-items: center; min-height: 92px; padding: 18px 15px; color: var(--command-muted); text-align: center; font-size: 10.5px; line-height: 1.7; }
+ 
+-.command-logs { border-top: 1px solid var(--command-border); background: #0b1726; }
++.command-logs { border-top: 1px solid #51534a; background: #1c211d; }
+ .command-logs .command-section-head { border-bottom: 0; min-height: 48px; padding-block: 9px; }
+ .command-text-btn { padding: 0 11px; color: var(--command-cyan); border-color: transparent; background: transparent; font-size: 10.5px; }
+ .log-list {
+@@ -397,7 +402,8 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+   .command-toolbar { gap: 8px; padding: 9px 10px; }
+   .command-context { padding-left: 7px; }
+   .command-context h2 { font-size: clamp(17px, 5.3vw, 22px); }
+-  .command-action-copy { display: none; }
++  .command-action-copy, .map-legend .map-hint { display: none; }
++  .view-command #graphLayers { margin-left: auto; min-height: 44px; }
+   .command-primary { padding-inline: 9px; }
+   .command-primary { width: 100%; }
+   .command-grid { display: flex; flex-direction: column; }
+@@ -419,14 +425,14 @@ body[data-view="command"] .status-pill[data-state="ready"] .dot { background: va
+ 
+   .mobile-node-bar {
+     display: flex; align-items: center; justify-content: space-between; gap: 10px;
+-    padding: 8px 12px; border-top: 1px solid var(--command-border); background: #0b1726;
++    padding: 8px 12px; border-top: 1px solid var(--command-border); background: #1c211d;
+   }
+   .mobile-node-bar > span { color: #8296ad; font-size: 9.5px; }
+   .mobile-node-bar button { min-height: 40px; padding: 0 10px; color: var(--command-cyan); border-color: #2a6570; background: rgba(55, 217, 232, .05); font-size: 10.5px; }
+   .mobile-node-bar button b { font: inherit; }
+   .mobile-node-list:not([hidden]) {
+     display: grid; grid-template-columns: 1fr; gap: 0; padding: 0 12px 8px;
+-    border-top: 1px solid rgba(37, 53, 75, .65); background: #0b1726;
++    border-top: 1px solid var(--command-border); background: #1c211d;
+   }
+   .mobile-node-row {
+     min-height: 44px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+diff --git a/cet-studyhack-command-edition/web/index.html b/cet-studyhack-command-edition/web/index.html
+index 5f3af14..f33b4b7 100644
+--- a/cet-studyhack-command-edition/web/index.html
++++ b/cet-studyhack-command-edition/web/index.html
+@@ -324,7 +324,11 @@
+                 </div>
+                 <div class="graph-rulers" aria-hidden="true"><i></i><i></i></div>
+               </div>
+-              <div class="map-legend"><span><i></i>错因</span><span><i></i>已有记录</span><span>拖动旋转 · 点击聚焦</span></div>
++              <div class="map-legend">
++                <span><i></i>错因</span><span><i></i>已有记录</span>
++                <span class="map-hint">拖动旋转 · 点击聚焦</span>
++                <button type="button" id="graphLayers" aria-pressed="false">展开分层</button>
++              </div>
+               <div class="mobile-node-bar">
+                 <span>主要错因</span>
+                 <button type="button" id="commandAllNodes" aria-expanded="false">全部错因 <b id="commandAllNodeCount"></b></button>

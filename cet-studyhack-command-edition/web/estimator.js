@@ -346,6 +346,7 @@ function renderEstimate() {
   const e = estimate;
   $('overviewHint').textContent = `${e.level === 'CET6' ? '六级 CET-6' : '四级 CET-4'} · 公开常模表插值与项目假设`;
   $('totalScore').textContent = e.total;
+  $('scoreDial').style.setProperty('--score-angle', `${Math.max(0, Math.min(e.total, 710)) / 710 * 270}deg`);
   $('totalRange').textContent = `${e.range[0]} – ${e.range[1]}`;
   $('gapValue').textContent = `${e.gap >= 0 ? '+' : ''}${e.gap} 分`;
   $('gapValue').dataset.tone = e.gapTone;

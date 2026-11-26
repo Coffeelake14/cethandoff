@@ -120,8 +120,8 @@ try {
   await navigate();
 
   check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command'`), 'command center opens by default');
-  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(7, 17, 31)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(13, 25, 41)'`), 'command center uses dark mission surface');
-  check(await evaluate(`!document.querySelector('.tabnav').getClientRects().length && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'simple-mode tabs stay out of command center');
+  check(await evaluate(`getComputedStyle(document.querySelector('.bg')).backgroundColor === 'rgb(18, 21, 19)' && getComputedStyle(document.querySelector('.command-console')).backgroundColor === 'rgb(32, 35, 34)'`), 'command center uses dark graphite surfaces');
+  check(await evaluate(`document.querySelector('.tabnav').getClientRects().length > 0 && document.getElementById('tab-command').getAttribute('aria-selected') === 'true' && !document.getElementById('view-reading').classList.contains('active') && !document.getElementById('view-estimator').classList.contains('active')`), 'command center provides navigation to the other stations');
   check((await metrics()).every(text => text.includes('—') && text.includes('待练习')), 'zero metrics show pending');
   check(JSON.stringify(await radarValues()) === JSON.stringify(['—', '—', '—', '—', '—']) && await evaluate(`document.querySelectorAll('#commandRadar .radar-point.is-pending').length === 5 && !document.querySelector('#commandRadar .radar-shape')`), 'five radar axes distinguish missing samples');
   check(await evaluate(`Boolean(document.querySelector('.field-plane') && document.querySelector('.orbit-mesh-front') && document.querySelector('.orbit-mesh-back'))`), 'field renders projection grid and distinct front and back meshes');
@@ -143,15 +143,20 @@ try {
   check(await evaluate(`document.getElementById('tab-reading').getClientRects().length > 0 && document.getElementById('tab-estimator').getClientRects().length > 0 && document.getElementById('tab-command').innerText.includes('返回作战中心')`), 'simple mode owns lab, estimator and command re-entry');
   const simpleShot = await screenshot('simple-desktop.png');
   await click('#tab-command');
-  check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'simple mode returns to command center');
+  check(await evaluate(`document.body.dataset.view === 'command' && document.body.dataset.mode === 'command'`), 'simple mode returns to command center');
   await click('[data-node="scope_expansion"]');
   check(await evaluate(`document.querySelector('#graphNodes [data-node=scope_expansion]').getAttribute('aria-pressed') === 'true'`), 'node selection works');
   check(await evaluate(`document.getElementById('commandNodeDetail').innerText.includes('屏幕阅读真的更差吗？')`), 'preset mapping appears');
   await click('#commandNodeDetail [data-action="train"]');
-  check(await evaluate(`document.body.dataset.view === 'reading' && document.activeElement.dataset.id === 'screen-reading'`), 'training opens and focuses matching material');
+  check(await evaluate(`document.body.dataset.view === 'reading' && document.body.dataset.mode === 'command' && document.activeElement.dataset.id === 'screen-reading' && document.querySelectorAll('[data-instrument=evidence] .instrument-slab').length === 4`), 'training opens in the 3D workbench and focuses matching material');
 
   await click('[data-key="A"]');
   await click('[data-sid="s5"]');
+  await click('#commandReturn');
+  check(await evaluate(`document.body.dataset.mode === 'simple' && document.body.dataset.view === 'reading' && !document.querySelector('[data-instrument=evidence]').getClientRects().length && document.querySelector('[data-sid=s5]').getAttribute('aria-pressed') === 'true'`), 'simple mode preserves live evidence selection');
+  await click('#commandReturn');
+  check(await evaluate(`document.body.dataset.mode === 'command' && document.body.dataset.view === 'reading' && document.querySelector('[data-key=A]').getAttribute('aria-pressed') === 'true'`), 'returning to 3D keeps the selected answer');
+  const labShot = await screenshot('workbench-lab.png');
   await click('[data-act="submit"]');
   check(await evaluate(`JSON.parse(localStorage.getItem('cet.lab.v1')).screen === 'hint'`), 'first answer reaches hint');
   check(await historyCount() === 0, 'hint does not record history');
@@ -225,6 +230,15 @@ try {
   await evaluate(`scrollTo({top:0,behavior:'instant'})`);
   await delay(900);
   const radarShot = await screenshot('command-radar.png');
+  const deckTop = () => evaluate(`document.querySelector('.deck-glass .deck-top').getBoundingClientRect().top`);
+  const assembled = await deckTop();
+  await click('#graphLayers');
+  await delay(410);
+  check(await evaluate(`document.querySelectorAll('.machine-deck').length === 4 && document.getElementById('graphLayers').getAttribute('aria-pressed') === 'true'`) && (await deckTop()) < assembled - 25, 'the section view lifts the upper decks');
+  await evaluate(`scrollTo({top:0,behavior:'instant'})`);
+  const layersShot = await screenshot('command-layers.png');
+  await click('#graphReset');
+  check(Math.abs((await deckTop()) - assembled) < 2 && await evaluate(`document.getElementById('graphLayers').getAttribute('aria-pressed') === 'false'`), 'reset restores the assembled deck');
   check(await evaluate(`document.querySelector('.monitor-count').textContent === '1'`), 'transfer does not inflate main error count');
   await click('#commandReturn');
   await click('[data-act="summary"]');
@@ -253,6 +267,26 @@ try {
   await click('#tab-command');
   await click('#commandReturn');
   check(await evaluate(`document.body.dataset.view === 'reading' && !document.getElementById('toolPanel').hidden && document.getElementById('toolInput').value === 'Keep this reading draft.'`), 'reading tool return preserves panel and input');
+  await click('#commandReturn');
+  check(await evaluate(`document.body.dataset.mode === 'command' && document.querySelector('[data-instrument=optics]').getClientRects().length > 0 && document.getElementById('toolInput').value === 'Keep this reading draft.'`), 'reading tools enter 3D without replacing the draft');
+  if (process.env.CET_TEST_FIXTURES === '1') {
+    await click('#toolSampleBtn');
+    for (const [button, section] of [['Trans', 'translation'], ['Vocab', 'vocab'], ['Grammar', 'grammar']]) {
+      await click(`#tool${button}Btn`);
+      await waitFor(`document.getElementById('tool-status-${section}').dataset.state === 'done'`, `reading tools fixture for ${section}`);
+      check(await evaluate(`document.getElementById('tool-sec-${section}').classList.contains('show')`), `${section} opens its 3D output panel`);
+    }
+    check(await evaluate(`!document.getElementById('toolExportBtn').disabled`), '3D vocabulary output retains dictation export');
+    await evaluate(`scrollTo({top:0,behavior:'instant'})`);
+  }
+  const toolShot = await screenshot('workbench-tools.png');
+  await click('#tab-estimator');
+  await click('#est-estimateBtn');
+  await waitFor(`document.getElementById('est-overviewCard').classList.contains('show')`, 'estimate result');
+  check(await evaluate(`document.body.dataset.mode === 'command' && parseFloat(document.getElementById('est-scoreDial').style.getPropertyValue('--score-angle')) > 0 && document.querySelectorAll('#est-moduleList .module').length === 4`), '3D result uses calculated score and four true module results');
+  await evaluate(`window.scrollTo({top:0,behavior:'instant'})`);
+  await delay(400);
+  const estimatorShot = await screenshot('workbench-estimator.png');
 
   await click('#tab-command');
   await evaluate(`(() => { const saved = JSON.parse(localStorage.getItem('cet.lab.v1')); delete saved.attemptId; localStorage.setItem('cet.lab.v1', JSON.stringify(saved)); })()`);
@@ -291,6 +325,7 @@ try {
   check(JSON.stringify(mobileGraph.ids) === JSON.stringify(['attitude_shift','causal_inversion','reading','scope_expansion']) && mobileGraph.items.every(item => item.left >= mobileGraph.viewport.left - 1 && item.right <= mobileGraph.viewport.right + 1 && item.top >= mobileGraph.viewport.top - 1 && item.bottom <= mobileGraph.viewport.bottom + 1), '390 graph labels stay inside viewport', JSON.stringify(mobileGraph));
   check(await evaluate(`document.getElementById('commandMobileNodes').hidden && document.getElementById('commandAllNodes').getAttribute('aria-expanded') === 'false'`), '390 extra causes start collapsed');
   const mobileShot = await screenshot('command-mobile.png');
+  check(await evaluate(`(() => { const deck = document.querySelector('.deck-base').getBoundingClientRect(), frame = document.querySelector('.graph-viewport').getBoundingClientRect(); return deck.left >= frame.left && deck.right <= frame.right && deck.bottom <= frame.bottom; })()`), 'the full 3D base fits a compact viewport');
   const mobileAxes = await evaluate(`[...document.querySelectorAll('#commandRadar .radar-axis')].map(el=>({left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right}))`);
   check(mobileAxes.length === 5 && mobileAxes.every(axis => axis.left >= 0 && axis.right <= 390), 'mobile radar keeps all five axes in view', JSON.stringify(mobileAxes));
   await evaluate(`document.querySelector('#commandPerformanceTitle').scrollIntoView({block:'center',behavior:'instant'})`);
@@ -306,17 +341,21 @@ try {
   check(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), '320px has no page horizontal overflow');
   const narrowButtons = await evaluate(`[...document.querySelectorAll('.mobile-node-row, .mobile-node-bar button, .graph-controls button, #commandReturn, #commandContinue, .node-train, .monitor-row, #commandShowAll')].filter(el => el.getClientRects().length).map(el=>{const r=el.getBoundingClientRect();return {text:el.innerText,left:r.left,right:r.right};})`);
   check(narrowButtons.every(rect => rect.left >= -1 && rect.right <= 321), '320px visible controls stay within page', JSON.stringify(narrowButtons.filter(rect => rect.left < -1 || rect.right > 321)));
+  await click('#tab-reading');
+  await click('#subtab-lab');
+  check(await evaluate(`document.body.dataset.mode === 'command' && document.documentElement.scrollWidth <= innerWidth && document.querySelector('.stage-assembly').getClientRects().length > 0`), '320px 3D evidence workbench fits the screen');
+  await click('#tab-command');
 
   await setViewport(1366, 768);
   await evaluate('scrollTo(0,0)');
-  check(await evaluate(`document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'wide command center keeps simple tabs hidden');
+  check(await evaluate(`document.body.dataset.mode === 'command' && getComputedStyle(document.querySelector('.tabnav')).position === 'fixed'`), 'wide command center keeps navigation in the header');
   await click('#commandReturn');
   check(await evaluate(`document.body.dataset.mode === 'simple' && document.querySelector('.tabnav').getClientRects().length > 0`), 'wide return reveals simple mode');
   await evaluate(`document.getElementById('tab-command').focus()`);
   await key('ArrowRight', 'ArrowRight', 39);
   check(await evaluate(`document.body.dataset.view === 'reading' && document.activeElement.id === 'tab-reading'`), 'tab arrow key wraps and moves focus');
   await click('#tab-command');
-  check(await evaluate(`document.body.dataset.mode === 'command' && !document.querySelector('.tabnav').getClientRects().length`), 'command tab returns from simple mode');
+  check(await evaluate(`document.body.dataset.mode === 'command' && document.body.dataset.view === 'command'`), 'command tab returns from simple mode');
   await click('#graphZoomIn');
   check(await evaluate(`document.getElementById('graphStage').style.getPropertyValue('--graph-zoom') === '1.1'`), 'graph zoom control works');
   await click('#graphReset');
@@ -365,7 +404,7 @@ try {
   check(await evaluate(`getComputedStyle(document.querySelector('.graph-node')).animationName === 'none' && getComputedStyle(document.querySelector('.graph-node')).transitionDuration === '0s'`), 'reduced motion removes graph animation');
   check(exceptions.length === 0, 'no browser runtime exceptions', exceptions.join('; '));
 
-  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, exceptions }, null, 2));
+  console.log(JSON.stringify({ status: 'PASS', checks: checks.length, wideShot, desktopShot, simpleShot, mobileShot, radarShot, mobileRadarShot, layersShot, labShot, toolShot, estimatorShot, exceptions }, null, 2));
 } finally {
   ws?.close();
   browser.kill();

@@ -1,7 +1,7 @@
 import { ERROR_LABELS, LAB_PRESETS } from './lab-data.js';
 import { escapeHtml } from './markdown.js';
 import { __labState, openReadingLab } from './lab.js';
-import { currentTab, openEstimator, returnToLearning } from './shell.js';
+import { currentTab, openEstimator } from './shell.js';
 import { groupErrorRecords, historyStorageStatus, listHistory, summarizeHistory } from './command-history.js';
 import { GRAPH_NODES, graphNodeLabel, initCommandGraph } from './command-graph.js';
 import { renderCommandRadar } from './command-radar.js';
@@ -199,7 +199,6 @@ function openTraining(button) {
   openReadingLab({ presetId: button.dataset.preset || null, startPresetMaterial: Boolean(button.dataset.preset) });
 }
 
-$('commandReturn').addEventListener('click', returnToLearning);
 $('commandContinue').addEventListener('click', () => openReadingLab({ presetId: __labState.material?.id || null }));
 $('commandShowAll').addEventListener('click', () => { expandedLogs = !expandedLogs; renderLogs(); });
 $('commandNodeDetail').addEventListener('click', event => {

@@ -14,3 +14,7 @@ node_modules/
 # Environment variables
 .env
 .env.*
+
+# Real acceptance photos and probe output stay local
+dev/live-samples/
+dev/live-results/
