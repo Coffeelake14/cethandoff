@@ -1,0 +1,50 @@
+.command-radar { padding: 1px 14px 12px; }
+
+.radar-board {
+  position: relative;
+  width: 100%;
+  max-width: 365px;
+  margin-inline: auto;
+  aspect-ratio: 300 / 247;
+  isolation: isolate;
+  background: radial-gradient(ellipse at 50% 50%, #1a394877, transparent 67%);
+}
+
+.radar-plot { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+.radar-dial, .radar-grid, .radar-spoke { fill: none; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.radar-dial { stroke: #5790a43b; stroke-dasharray: 1 5; }
+.radar-grid { stroke: #5f91a440; }
+.radar-spoke { stroke: #42647b; }
+.radar-spoke.is-active { stroke: #7cdfdb; stroke-width: 1.5; }
+.radar-edge, .radar-shape { stroke: #a3f1e7; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.radar-edge { fill: none; }
+.radar-shape { fill: #40dcc725; filter: drop-shadow(0 0 6px #52dfd350); }
+.radar-point.is-pending { fill: #102132; stroke: #678895; stroke-width: 1.2; }
+.radar-point.is-measured { fill: #bdf8f0; stroke: #123745; stroke-width: 1.5; }
+.radar-point.is-active { stroke: #c6f9f2; stroke-width: 1.8; }
+
+.view-command .radar-axis {
+  position: absolute; z-index: 1; left: var(--axis-x); top: var(--axis-y);
+  display: grid; place-items: center; align-content: center; min-width: 44px; min-height: 44px;
+  transform: translate(-50%, -50%); padding: 3px 4px; border: 1px solid transparent;
+  border-radius: 3px; background: transparent; color: #c2d4de; cursor: pointer;
+  font-size: 11px; line-height: 1.22; white-space: nowrap;
+  transition: color .16s, background .16s, border-color .16s;
+}
+.radar-axis b { color: #a2d8d5; margin-top: 1px; font: 700 11px/1.15 ui-monospace, Consolas, monospace; }
+.radar-axis[data-samples="0"] b { color: #8598ad; }
+.view-command .radar-axis:hover, .view-command .radar-axis[aria-pressed="true"] { color: #ebfffd; border-color: #64b6b670; background: #122b3996; }
+.radar-readout {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 10px 12px; min-height: 58px; border: 1px solid #395466;
+  border-left: 2px solid #7de2da; background: #091724;
+}
+.radar-readout > div { display: grid; gap: 2px; }
+.radar-caption { color: #e6f0f7; font-size: 12px; }
+.radar-sample { color: #a4b9c9; font-size: 10px; }
+.radar-value { color: #c7f6ed; font: 700 20px/1 ui-monospace, Consolas, monospace; white-space: nowrap; }
+
+@media (max-width: 767px) {
+  .command-radar { padding-inline: 12px; }
+  .radar-readout { max-width: 365px; margin-inline: auto; }
+}
